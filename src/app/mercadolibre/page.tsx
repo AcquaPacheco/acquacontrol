@@ -65,7 +65,7 @@ const PROFIT_META = {
 };
 
 function SyncBadge({ status }: { status: MLSyncStatus }) {
-  const m = SYNC_META[status];
+  const m = SYNC_META[status] ?? { label: status, bg: 'bg-gray-100', text: 'text-gray-500', dot: 'bg-gray-400', border: 'border-gray-200' };
   return (
     <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border whitespace-nowrap', m.bg, m.text, m.border)}>
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', m.dot)} />
@@ -670,8 +670,8 @@ function TableTab({
                     )}
                     {/* Sync dot */}
                     <span
-                      className={cn('absolute top-2 right-2 w-2.5 h-2.5 rounded-full border-2 border-white', SYNC_META[p.syncStatus].dot)}
-                      title={SYNC_META[p.syncStatus].label}
+                      className={cn('absolute top-2 right-2 w-2.5 h-2.5 rounded-full border-2 border-white', (SYNC_META[p.syncStatus] ?? SYNC_META['error_datos']).dot)}
+                      title={(SYNC_META[p.syncStatus] ?? SYNC_META['error_datos']).label}
                     />
                     {/* Margin badge */}
                     {p.calc && (

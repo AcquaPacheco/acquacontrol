@@ -898,8 +898,9 @@ export default function ProductosPage() {
   // Listen for openMLAssign events fired from the inspector's ML Lab button
   useEffect(() => {
     const handler = (e: Event) => {
-      const { productId } = (e as CustomEvent<{ productId: string }>).detail;
-      const found = products.find(p => p.id === productId) ?? null;
+      const detail = (e as CustomEvent<{ productId?: string }>).detail;
+      if (!detail?.productId) return;
+      const found = products.find(p => p.id === detail.productId) ?? null;
       setMlAssignTarget(found);
     };
     window.addEventListener('openMLAssign', handler);
@@ -1566,7 +1567,7 @@ export default function ProductosPage() {
           {inspectorOpen && (
             <div className="hidden lg:block">
               <div className="sticky top-4">
-                <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} />
+                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} />}
               </div>
             </div>
           )}
