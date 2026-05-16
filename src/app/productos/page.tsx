@@ -9,8 +9,9 @@ import {
   X, ExternalLink, Copy, Edit2,
   Truck, Star, ArrowUpRight, ChevronRight,
   Globe, AlertTriangle, Check,
-  Tag, Eye, EyeOff,
+  Tag, Eye, EyeOff, ShoppingCart,
 } from 'lucide-react';
+import { useMLProducts, ML_STATUS_LABELS, ML_STATUS_COLORS, MLStatus, MLProductConfig } from '@/lib/use-ml-products';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
@@ -165,6 +166,143 @@ function getMarketUrls(p: Product) {
     { name: 'Carrefour',    url: `https://www.carrefour.com.ar/busca/?ft=${q}`,             cls: 'bg-blue-600 text-white hover:opacity-80' },
     { name: 'PedidosYa',    url: `https://www.pedidosya.com.ar/supermercados?search=${q}`,  cls: 'bg-orange-500 text-white hover:opacity-80' },
   ];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ML ASSIGN MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MLAssignModal({
+  product,
+  current,
+  onSave,
+  onRemove,
+  onClose,
+}: {
+  product: Product;
+  current?: MLProductConfig;
+  onSave: (status: MLStatus, mlItemId: string, publishedPrice: string, notes: string) => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const [status,         setStatus]         = useState<MLStatus>(current?.mlStatus ?? 'candidato');
+  const [mlItemId,       setMlItemId]       = useState(current?.mlItemId ?? '');
+  const [publishedPrice, setPublishedPrice] = useState(current?.publishedPrice ? String(current.publishedPrice) : '');
+  const [notes,          setNotes]          = useState(current?.notes ?? '');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 z-10"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-[#FFE600] flex items-center justify-center shrink-0">
+              <ShoppingCart className="w-4 h-4 text-gray-900" />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">MercadoLibre</p>
+              <p className="text-[12px] font-bold text-gray-900 line-clamp-1">{product.name}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Estado */}
+        <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2">Estado en ML</p>
+        <div className="grid grid-cols-2 gap-1.5 mb-4">
+          {(['activo', 'pausado', 'inactivo', 'candidato'] as MLStatus[]).map(s => {
+            const c = ML_STATUS_COLORS[s];
+            const active = status === s;
+            return (
+              <button
+                key={s}
+                onClick={() => setStatus(s)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-xl border text-[12px] font-semibold transition-all',
+                  active
+                    ? `${c.bg} ${c.text} ${c.border} ring-2 ring-offset-1`
+                    : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100',
+                  active && s === 'activo'    ? 'ring-[#16A34A]/40' :
+                  active && s === 'pausado'   ? 'ring-[#F97316]/40' :
+                  active && s === 'inactivo'  ? 'ring-gray-300'     :
+                  active && s === 'candidato' ? 'ring-[#0784F2]/40' : '',
+                )}
+              >
+                <span className={cn('w-2 h-2 rounded-full shrink-0', active ? c.dot : 'bg-gray-300')} />
+                {ML_STATUS_LABELS[s]}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* MLA Item ID */}
+        <label className="block mb-3">
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+            ID de publicación (MLA-)
+          </span>
+          <input
+            type="text"
+            value={mlItemId}
+            onChange={e => setMlItemId(e.target.value.trim())}
+            placeholder="MLA1234567890 (opcional)"
+            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[12px] font-mono text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#FFE600]/60 focus:border-[#FFE600]"
+          />
+        </label>
+
+        {/* Precio publicado */}
+        <label className="block mb-3">
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+            Precio publicado en ML
+          </span>
+          <input
+            type="number"
+            value={publishedPrice}
+            onChange={e => setPublishedPrice(e.target.value)}
+            placeholder="Ej: 25000 (opcional)"
+            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[12px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#FFE600]/60 focus:border-[#FFE600]"
+          />
+        </label>
+
+        {/* Notas */}
+        <label className="block mb-4">
+          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block mb-1">
+            Notas
+          </span>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            placeholder="Observaciones, variantes, etc."
+            rows={2}
+            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-[12px] text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#FFE600]/60 focus:border-[#FFE600] resize-none"
+          />
+        </label>
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          {current && (
+            <button
+              onClick={onRemove}
+              className="px-3 py-2.5 border border-red-200 text-red-500 hover:bg-red-50 rounded-xl text-[12px] font-semibold transition-colors"
+            >
+              Quitar de ML
+            </button>
+          )}
+          <button
+            onClick={() => onSave(status, mlItemId, publishedPrice, notes)}
+            className="flex-1 bg-[#FFE600] text-gray-900 rounded-xl px-4 py-2.5 text-[12px] font-bold hover:opacity-90 transition-opacity"
+          >
+            {current ? 'Actualizar' : 'Agregar a ML'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -654,8 +792,15 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive }:
             <button className="flex items-center justify-center gap-1.5 py-2.5 px-3 border border-gray-200 rounded-xl text-[11px] font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
               <Edit2 className="w-3.5 h-3.5" /> Editar datos
             </button>
-            <button className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[#FFE600] rounded-xl text-[11px] font-bold text-gray-900 hover:opacity-80 transition-opacity">
-              <Star className="w-3.5 h-3.5" /> ML Lab
+            <button
+              onClick={() => {
+                onClose();
+                // Open ML assign modal for this product via a custom event
+                window.dispatchEvent(new CustomEvent('openMLAssign', { detail: { productId: p.id } }));
+              }}
+              className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[#FFE600] rounded-xl text-[11px] font-bold text-gray-900 hover:opacity-80 transition-opacity"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" /> ML Lab
             </button>
           </div>
         </div>
@@ -745,6 +890,21 @@ export default function ProductosPage() {
   const [view,          setView]          = useState<'lista' | 'grid'>('lista');
   const [page,          setPage]          = useState(1);
   const PER_PAGE = 50;
+
+  // ── MercadoLibre product tracking ──
+  const { getMLConfig, setMLConfig, removeMLConfig, mlCounts } = useMLProducts();
+  const [mlAssignTarget, setMlAssignTarget] = useState<Product | null>(null);
+
+  // Listen for openMLAssign events fired from the inspector's ML Lab button
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { productId } = (e as CustomEvent<{ productId: string }>).detail;
+      const found = products.find(p => p.id === productId) ?? null;
+      setMlAssignTarget(found);
+    };
+    window.addEventListener('openMLAssign', handler);
+    return () => window.removeEventListener('openMLAssign', handler);
+  }, []);
 
   // ── Columnas redimensionables ──
   const { widths: colW, startResize } = useColumnResize({
@@ -901,6 +1061,12 @@ export default function ProductosPage() {
               <>
                 <Divider />
                 <Stat label="Sin costo"  value={String(stats.sinCosto)} color="text-[#EF4444]" />
+              </>
+            )}
+            {mlCounts.total > 0 && (
+              <>
+                <Divider />
+                <Stat label="En ML"      value={String(mlCounts.total)} color="text-[#FFE600]" />
               </>
             )}
           </div>
@@ -1121,6 +1287,9 @@ export default function ProductosPage() {
                           Estado
                           <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('estado')} />
                         </th>
+                        <th className="text-center px-2 py-2.5 w-10 hidden sm:table-cell" title="MercadoLibre">
+                          <ShoppingCart className="w-3.5 h-3.5 text-gray-400 mx-auto" />
+                        </th>
                         <th className="w-8 px-2 py-2.5" />
                       </tr>
                     </thead>
@@ -1214,6 +1383,38 @@ export default function ProductosPage() {
                               )}>
                                 {statusBadge(p.status).label}
                               </span>
+                            </td>
+                            {/* ML assign cell */}
+                            <td className="px-2 py-2.5 text-center hidden sm:table-cell"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              {(() => {
+                                const mlCfg = getMLConfig(p.id);
+                                if (mlCfg) {
+                                  const c = ML_STATUS_COLORS[mlCfg.mlStatus];
+                                  return (
+                                    <button
+                                      onClick={() => setMlAssignTarget(p)}
+                                      title={`ML: ${ML_STATUS_LABELS[mlCfg.mlStatus]}`}
+                                      className={cn(
+                                        'w-6 h-6 flex items-center justify-center rounded-md border transition-all',
+                                        c.bg, c.border,
+                                      )}
+                                    >
+                                      <span className={cn('w-2 h-2 rounded-full', c.dot)} />
+                                    </button>
+                                  );
+                                }
+                                return (
+                                  <button
+                                    onClick={() => setMlAssignTarget(p)}
+                                    title="Agregar a MercadoLibre"
+                                    className="w-6 h-6 flex items-center justify-center rounded-md text-gray-300 hover:text-[#FFE600] hover:bg-[#FFE600]/10 opacity-0 group-hover:opacity-100 transition-all"
+                                  >
+                                    <ShoppingCart className="w-3.5 h-3.5" />
+                                  </button>
+                                );
+                              })()}
                             </td>
                             {/* Toggle activo — inline, sin abrir inspector */}
                             <td className="px-2 py-2.5 text-center"
@@ -1380,10 +1581,32 @@ export default function ProductosPage() {
         )}
 
       </div>
+
+      {/* ── ML Assign Modal ── */}
+      {mlAssignTarget && (
+        <MLAssignModal
+          product={mlAssignTarget}
+          current={getMLConfig(mlAssignTarget.id)}
+          onClose={() => setMlAssignTarget(null)}
+          onRemove={() => {
+            removeMLConfig(mlAssignTarget.id);
+            setMlAssignTarget(null);
+          }}
+          onSave={(status, mlItemId, publishedPrice, notes) => {
+            setMLConfig(mlAssignTarget.id, {
+              mlStatus: status,
+              mlItemId: mlItemId || undefined,
+              publishedPrice: publishedPrice ? Number(publishedPrice) : undefined,
+              notes:    notes   || undefined,
+            });
+            setMlAssignTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-// Evitar warning de import no utilizado
+// Evitar warning de imports no utilizados
 const _Tag = Tag;
 void _Tag;

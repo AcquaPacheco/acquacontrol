@@ -1,14 +1,7 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { AppHeader } from "@/components/shared/app-header";
 import { FloatingConsultor } from "@/components/shared/floating-consultor";
-
-const inter = Inter({
-  variable: "--font-sans",
-  subsets: ["latin"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "ACQUA CONTROL OS",
@@ -24,8 +17,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col font-sans bg-surface">
+    <html lang="es" className="h-full">
+      <body className="min-h-full flex flex-col font-sans bg-surface antialiased">
         <AppHeader />
         <main className="flex-1 pb-16 lg:pb-0">{children}</main>
         <FloatingConsultor />

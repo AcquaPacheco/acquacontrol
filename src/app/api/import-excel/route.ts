@@ -177,16 +177,17 @@ const CONTACT_COLS = {
   fiscal: ['l10n ar afip', 'responsabilidad', 'condicion fiscal', 'afip'],
 };
 
-// Columnas del export de stock de Odoo (stock.quant)
-// Headers reales: id, inventory_quantity, package_id, product_id, location_id, on_hand, id
-// product_id viene como "[SKU] Nombre del producto" → se extrae SKU y nombre con extractTmplName
+// Columnas del export de stock de Odoo (stock.quant o product.product)
+// stock.quant:   product_id viene como "[SKU] Nombre del producto"
+// product.product: columnas id, name, qty_available, display_name, barcode, outgoing_qty
 const STOCK_COLS = {
   id:           ['id'],
-  name:         ['product id'],                                          // "[SKU] Nombre"
+  name:         ['product id', 'display name', 'nombre'],               // stock.quant: product_id | product.product: display_name o name
+  nameAlt:      ['name'],                                                // fallback: columna "name" de product.product
   qtyAvailable: ['inventory quantity', 'qty available', 'quantity',      // inventory_quantity
                  'cantidad disponible', 'stock disponible', 'disponible', 'cantidad'],
   qtyReserved:  ['reserved quantity', 'qty reserved', 'cantidad reservada', 'reservado'],
-  qtyForecast:  ['virtual available', 'stock previsto', 'previsto', 'forecasted'],
+  qtyForecast:  ['virtual available', 'stock previsto', 'previsto', 'forecasted', 'outgoing qty'],
   location:     ['location id', 'ubicacion', 'location', 'almacen'],
   uom:          ['uom id', 'unidad de medida', 'uom'],
 };
@@ -472,20 +473,25 @@ function parseStockSheet(rawRows: unknown[][], date: string, headerRowIdx = 0): 
   const rawHeaders = (rawRows[headerRowIdx] as unknown[]).map(norm);
   const colMap: Record<string, number> = {};
   for (const [field, aliases] of Object.entries(STOCK_COLS)) {
-    colMap[field] = detectCol(rawHeaders, aliases);
+    colMap[field] = detectCol(rawHeaders, aliases as string[]);
   }
 
   const items: StockItem[] = [];
   const warnings: string[] = [];
   let skipped = 0;
 
-  // Odoo stock.quant: product_id viene como "[SKU] Nombre del producto"
+  // Soporta tanto stock.quant ("[SKU] Nombre") como product.product (name/display_name)
   for (let i = headerRowIdx + 1; i < rawRows.length; i++) {
     const row = rawRows[i] as unknown[];
-    const rawProductId = colMap.name !== -1 ? String(row[colMap.name] ?? '').trim() : '';
+
+    // Intentar con columna principal (product_id / display_name), luego con name
+    let rawProductId = colMap.name !== -1 ? String(row[colMap.name] ?? '').trim() : '';
+    if (!rawProductId && colMap.nameAlt !== -1) {
+      rawProductId = String(row[colMap.nameAlt] ?? '').trim();
+    }
     if (!rawProductId) { skipped++; continue; }
 
-    // Extraer nombre y SKU del formato "[SKU] Nombre"
+    // Extraer nombre y SKU del formato "[SKU] Nombre" (stock.quant) o nombre plano (product.product)
     const productName = extractTmplName(rawProductId);
     const sku         = extractSkuFromProductId(rawProductId);
     if (!productName) { skipped++; continue; }
@@ -679,6 +685,29 @@ export async function POST(req: NextRequest) {
         writeFileSync(SUPPLIER_PATH, JSON.stringify(groups, null, 2), 'utf8');
         written.supplierinfo = groups.length;
         written.supplierinfo_products = result.rows.length;
+
+        // Auto-generar contactos básicos desde los nombres de proveedor del supplierinfo
+        // (evita necesitar un export res.partner separado)
+        const existingContacts: Contact[] = (() => {
+          try { return JSON.parse(readFileSync(CONTACTS_PATH, 'utf8')) as Contact[]; } catch { return []; }
+        })();
+        const existingSlugs = new Set(existingContacts.map(c => c.slug));
+        const newContacts = groups
+          .filter(g => g.name && !existingSlugs.has(g.slug))
+          .map(g => ({
+            id:              `si_${g.slug}`,
+            name:            g.name,
+            slug:            g.slug,
+            phone:           null,
+            tags:            [],
+            fiscalCondition: null,
+            odooId:          null,
+          } as Contact));
+        if (newContacts.length > 0) {
+          const merged = [...existingContacts, ...newContacts].sort((a, b) => a.name.localeCompare(b.name));
+          writeFileSync(CONTACTS_PATH, JSON.stringify(merged, null, 2), 'utf8');
+          written.contacts_auto = newContacts.length;
+        }
 
       } else if (result.type === 'supplier') {
         // Un proveedor individual: replace o append en odoo-supplierinfo.json

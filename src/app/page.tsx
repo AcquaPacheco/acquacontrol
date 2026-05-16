@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import {
   Settings, Package, Users, FileSpreadsheet,
   CheckCircle2, ArrowRight, ChevronRight,
   DollarSign, TrendingDown, AlertTriangle,
   XCircle, Lightbulb, Circle,
+  Key, RefreshCw, ShoppingCart, Tag, Lock,
 } from 'lucide-react';
 import Link from 'next/link';
 import productsData    from '@/data/products.json';
@@ -30,17 +31,16 @@ const stock     = stockData     as unknown as { id: string }[];
 // ─── Checklist de pasos ───────────────────────────────────────────────────────
 function useSteps() {
   return useMemo(() => {
-    const hasParams    = true; // parámetros siempre están (tienen defaults)
+    const hasParams    = true;
     const hasSuppliers = suppliers.length > 0;
     const hasProducts  = products.length > 0;
     const hasStock     = stock.length > 0;
     const hasLists     = odooSup.some(s => s.count > 0);
 
-    // Calcular stats reales si hay datos
-    const sinCosto       = products.filter(p => !p.cost || p.cost === 0).length;
-    const margenCritico  = products.filter(p => p.cost > 0 && p.price > 0 && (p.margin === null || p.margin < 35)).length;
-    const supplierNames  = new Set(products.filter(p => p.supplierName).map(p => p.supplierName!));
-    const conLista       = odooSup.filter(s => s.count > 0).length;
+    const sinCosto      = products.filter(p => !p.cost || p.cost === 0).length;
+    const margenCritico = products.filter(p => p.cost > 0 && p.price > 0 && (p.margin === null || p.margin < 35)).length;
+    const supplierNames = new Set(products.filter(p => p.supplierName).map(p => p.supplierName!));
+    const conLista      = odooSup.filter(s => s.count > 0).length;
 
     return {
       hasParams, hasSuppliers, hasProducts, hasStock, hasLists,
@@ -62,9 +62,9 @@ const today = new Date().toLocaleDateString('es-AR', {
 
 // ─── Onboarding step card ─────────────────────────────────────────────────────
 function StepCard({
-  num, done, active, title, subtitle, desc, href, cta, children,
+  num, done, active, locked, title, subtitle, desc, href, cta, children,
 }: {
-  num: number; done: boolean; active: boolean;
+  num: number; done: boolean; active: boolean; locked?: boolean;
   title: string; subtitle?: string; desc: string;
   href: string; cta: string;
   children?: React.ReactNode;
@@ -73,25 +73,31 @@ function StepCard({
     <div className={cn(
       'bg-white rounded-2xl border p-6 transition-all',
       done    ? 'border-success/30' :
+      locked  ? 'border-gray-100 opacity-50 pointer-events-none select-none' :
       active  ? 'border-acqua/40 shadow-lg shadow-acqua/5 ring-1 ring-acqua/20' :
                 'border-gray-200 opacity-60',
     )}>
       <div className="flex items-start gap-4">
-        {/* Número / check */}
+        {/* Número / check / lock */}
         <div className={cn(
           'w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shrink-0 mt-0.5',
           done   ? 'bg-success text-white' :
+          locked ? 'bg-gray-100 text-gray-300' :
           active ? 'bg-acqua text-white' :
                    'bg-gray-100 text-gray-400',
         )}>
-          {done ? <CheckCircle2 className="w-5 h-5" /> : num}
+          {done   ? <CheckCircle2 className="w-5 h-5" /> :
+           locked ? <Lock className="w-4 h-4" /> :
+                    num}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <h3 className={cn(
               'text-sm font-bold',
-              done ? 'text-success' : active ? 'text-gray-900' : 'text-gray-500',
+              done   ? 'text-success' :
+              locked ? 'text-gray-400' :
+              active ? 'text-gray-900' : 'text-gray-500',
             )}>
               {title}
             </h3>
@@ -103,15 +109,18 @@ function StepCard({
                 ✓ Completado
               </span>
             )}
-            {active && !done && (
+            {active && !done && !locked && (
               <span className="text-[10px] font-bold text-acqua bg-acqua/10 px-2 py-0.5 rounded-full ml-auto animate-pulse">
                 ← Próximo paso
               </span>
             )}
           </div>
-          <p className="text-[12px] text-gray-500 leading-relaxed mb-3">{desc}</p>
+          <p className={cn(
+            'text-[12px] leading-relaxed mb-3',
+            locked ? 'text-gray-400' : 'text-gray-500',
+          )}>{desc}</p>
           {children && <div className="mb-3">{children}</div>}
-          {!done && active && (
+          {!done && active && !locked && (
             <Link href={href}
               className="inline-flex items-center gap-2 px-4 py-2 bg-acqua text-white text-[12px] font-bold rounded-xl hover:bg-acqua-dark transition-colors"
             >
@@ -189,7 +198,7 @@ function Dashboard({ s }: { s: ReturnType<typeof useSteps> }) {
   });
 
   return (
-    <div className="px-4 lg:px-6 mt-4 mb-10">
+    <div className="px-4 lg:px-6 mt-4 mb-6">
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {kpis.map((kpi, i) => {
@@ -255,12 +264,13 @@ function Dashboard({ s }: { s: ReturnType<typeof useSteps> }) {
         <div className="space-y-3">
           <h2 className="text-sm font-bold text-gray-900">Módulos</h2>
           {[
-            { label: 'Proveedores',  icon: Users,          href: '/proveedores', sub: `${s.totalSuppliers} importados` },
-            { label: 'Productos',    icon: Package,         href: '/productos',   sub: `${s.totalProducts} productos` },
-            { label: 'Costos',       icon: DollarSign,      href: '/costos',      sub: `${s.sinCosto} sin costo` },
-            { label: 'Rentabilidad', icon: TrendingDown,    href: '/rentabilidad',sub: `${s.margenCritico} críticos` },
-            { label: 'Export Odoo',  icon: FileSpreadsheet, href: '/export-odoo', sub: 'Exportar a Odoo' },
-            { label: 'Parámetros',   icon: Settings,        href: '/parametros',  sub: 'Configuración' },
+            { label: 'Proveedores',   icon: Users,          href: '/proveedores',  sub: `${s.totalSuppliers} importados` },
+            { label: 'Productos',     icon: Package,         href: '/productos',    sub: `${s.totalProducts} productos` },
+            { label: 'Costos',        icon: DollarSign,      href: '/costos',       sub: `${s.sinCosto} sin costo` },
+            { label: 'Rentabilidad',  icon: TrendingDown,    href: '/rentabilidad', sub: `${s.margenCritico} críticos` },
+            { label: 'ML Lab',        icon: ShoppingCart,    href: '/mercadolibre', sub: 'Análisis MercadoLibre' },
+            { label: 'Export Odoo',   icon: FileSpreadsheet, href: '/export-odoo',  sub: 'Exportar a Odoo' },
+            { label: 'Parámetros',    icon: Settings,        href: '/parametros',   sub: 'Configuración' },
           ].map((m, i) => {
             const Icon = m.icon;
             return (
@@ -283,17 +293,85 @@ function Dashboard({ s }: { s: ReturnType<typeof useSteps> }) {
   );
 }
 
+// ─── Botón resetear ───────────────────────────────────────────────────────────
+function ResetButton({ hasData }: { hasData: boolean }) {
+  const [resetting, setResetting] = useState(false);
+
+  const handleReset = async () => {
+    if (!confirm(
+      '⚠️ ¿Resetear todos los datos?\n\n' +
+      'Esto borrará permanentemente:\n' +
+      '• Productos importados\n' +
+      '• Proveedores\n' +
+      '• Stock\n' +
+      '• Listas de precios\n\n' +
+      'El sistema quedará como nuevo para volver a cargar todo desde Odoo.',
+    )) return;
+
+    setResetting(true);
+    try {
+      const res = await fetch('/api/data-management', {
+        method: 'DELETE',
+        headers: { 'X-Confirm': 'RESET_ALL_DATA' },
+      });
+      if (!res.ok) throw new Error('Error en el servidor');
+      window.location.reload();
+    } catch (err) {
+      alert('Error al resetear. Intentá de nuevo. (' + String(err) + ')');
+      setResetting(false);
+    }
+  };
+
+  if (!hasData) return null;
+
+  return (
+    <button
+      onClick={handleReset}
+      disabled={resetting}
+      className="inline-flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold text-gray-400 hover:text-danger hover:bg-danger/5 border border-gray-200 hover:border-danger/20 rounded-lg transition-all disabled:opacity-50"
+    >
+      <RefreshCw className={cn('w-3 h-3', resetting && 'animate-spin')} />
+      {resetting ? 'Reseteando...' : 'Resetear todo'}
+    </button>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ControlPage() {
   const s = useSteps();
 
-  // Detectar primer paso activo (sin hacer)
-  const steps = [
-    { key: 'params',    done: s.hasParams },
-    { key: 'import',    done: s.hasSuppliers && s.hasProducts },
-    { key: 'lists',     done: s.hasLists },
+  // Detectar datos de ML Lab desde localStorage
+  const [mlProducts, setMlProducts] = useState(0);
+  const [mlWithId, setMlWithId] = useState(0);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('acqua_ml_lab_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { products?: Array<{ mlItemId?: string; mlPrice?: number }> };
+        const prods = parsed.products ?? [];
+        setMlProducts(prods.length);
+        setMlWithId(prods.filter(p => p.mlItemId).length);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const hasMLPrices = mlProducts > 0;       // reglas de precio Odoo → ML
+  const hasMLPubs   = mlWithId > 0;          // publicaciones con ítem ID de ML
+
+  const coreDone = s.allDone; // pasos 1-3 completos
+  const hasAnyData = s.hasSuppliers || s.hasProducts;
+
+  // Primer paso activo entre 1-3
+  const coreSteps = [
+    { key: 'params', done: s.hasParams },
+    { key: 'import', done: s.hasSuppliers && s.hasProducts },
+    { key: 'lists',  done: s.hasLists },
   ];
-  const firstActiveIdx = steps.findIndex(st => !st.done);
+  const firstCoreActiveIdx = coreSteps.findIndex(st => !st.done);
+
+  // Para la guía completa de 6 pasos: el primer activo entre todos
+  const allStepsDone = [s.hasParams, s.hasSuppliers && s.hasProducts, s.hasLists, hasMLPrices, hasMLPubs, false];
+  const firstAllActiveIdx = allStepsDone.findIndex(d => !d);
 
   return (
     <div className="min-h-screen">
@@ -304,34 +382,51 @@ export default function ControlPage() {
         <div className="relative rounded-2xl overflow-hidden min-h-[120px] bg-gradient-to-r from-gray-950 via-gray-900 to-gray-800">
           <div className="absolute inset-0 opacity-20"
             style={{ backgroundImage: 'radial-gradient(circle at 70% 50%, #0EA5E9 0%, transparent 60%)' }} />
-          <div className="relative z-10 px-8 py-6">
-            <p className="text-white/40 text-xs font-medium mb-1 uppercase tracking-widest">Centro de Control</p>
-            <h1 className="text-3xl lg:text-4xl font-bold text-white tracking-tight">Acqua Control OS</h1>
-            <p className="text-white/50 text-sm mt-1 capitalize">{today}</p>
+          <div className="relative z-10 px-8 py-6 flex items-end justify-between">
+            <div>
+              <p className="text-white/40 text-xs font-medium mb-1 uppercase tracking-widest">Centro de Control</p>
+              <h1 className="text-3xl lg:text-4xl font-bold text-white tracking-tight">Acqua Control OS</h1>
+              <p className="text-white/50 text-sm mt-1 capitalize">{today}</p>
+            </div>
+            {hasAnyData && (
+              <div className="pb-1">
+                <ResetButton hasData={hasAnyData} />
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── ONBOARDING — mientras no haya todos los datos ─────────── */}
-      {!s.allDone && (
+      {/* ── ONBOARDING — guía completa cuando no hay datos base ───── */}
+      {!coreDone && (
         <div className="px-4 lg:px-6 mt-5 mb-10">
           <div className="max-w-2xl">
             <div className="mb-5">
-              <h2 className="text-base font-bold text-gray-900 mb-1">Configuración inicial</h2>
+              <h2 className="text-base font-bold text-gray-900 mb-1">
+                Orden recomendado de carga
+              </h2>
               <p className="text-[13px] text-gray-500">
-                Seguí estos pasos en orden para que el sistema empiece a calcular márgenes y alertas reales.
+                Seguí estos 6 pasos para que el sistema esté completamente operativo.
+                Los primeros 3 son la base; los siguientes conectan MercadoLibre.
               </p>
             </div>
 
             <div className="space-y-3">
 
+              {/* ── BLOQUE 1: BASE ─────────────────────────────────── */}
+              <div className="flex items-center gap-3 mb-1">
+                <div className="h-px flex-1 bg-gray-100" />
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Base del sistema</span>
+                <div className="h-px flex-1 bg-gray-100" />
+              </div>
+
               {/* PASO 1 — Parámetros */}
               <StepCard
                 num={1}
-                done={false}
-                active={firstActiveIdx === 0}
+                done={s.hasParams}
+                active={firstAllActiveIdx === 0}
                 title="Configurar parámetros"
-                subtitle="Tipo de cambio · Markups · Listas de precios"
+                subtitle="Tipo de cambio · Markups · Medios de pago"
                 desc="Configurá el dólar operativo, los porcentajes de markup por lista (A, B, Profesional) y los medios de pago. Esto define cómo se calculan los precios en todo el sistema."
                 href="/parametros"
                 cta="Ir a Parámetros"
@@ -341,30 +436,29 @@ export default function ControlPage() {
               <StepCard
                 num={2}
                 done={s.hasSuppliers && s.hasProducts}
-                active={firstActiveIdx === 1}
+                active={firstAllActiveIdx === 1}
                 title="Importar desde Odoo"
                 subtitle="Proveedores · Productos · Stock"
                 desc="Exportá los tres archivos desde Odoo e importálos acá. El sistema los cruza automáticamente: cada producto queda vinculado a su proveedor con costo y precio."
                 href="/parametros"
                 cta="Importar datos"
               >
-                {/* Sub-checklist */}
                 <div className="space-y-1.5 mt-1">
                   {[
                     {
                       label: 'Proveedores (res.partner)',
                       done: s.hasSuppliers,
-                      count: s.hasSuppliers ? `${s.totalSuppliers} importados` : 'Exportar de Odoo → Contactos → Proveedores',
+                      count: s.hasSuppliers ? `${s.totalSuppliers} importados` : 'Odoo → Contactos → Proveedores',
                     },
                     {
                       label: 'Productos (product.template)',
                       done: s.hasProducts,
-                      count: s.hasProducts ? `${s.totalProducts} importados` : 'Exportar de Odoo → Inventario → Productos',
+                      count: s.hasProducts ? `${s.totalProducts} importados` : 'Odoo → Inventario → Productos',
                     },
                     {
                       label: 'Stock (stock.quant)',
                       done: s.hasStock,
-                      count: s.hasStock ? `${s.totalStock} registros` : 'Exportar de Odoo → Inventario → Stock actual',
+                      count: s.hasStock ? `${s.totalStock} registros` : 'Odoo → Inventario → Stock actual',
                     },
                   ].map((item, i) => (
                     <div key={i} className={cn(
@@ -388,7 +482,7 @@ export default function ControlPage() {
               <StepCard
                 num={3}
                 done={s.hasLists}
-                active={firstActiveIdx === 2}
+                active={firstAllActiveIdx === 2}
                 title="Cargar listas de precios"
                 subtitle="Por proveedor · Detecta formato automáticamente"
                 desc="Entrá al detalle de cada proveedor y subí su lista de precios (Excel, PDF o imagen). El sistema detecta el formato, compara con los costos actuales y te muestra qué subió, qué bajó y qué es promo."
@@ -406,6 +500,99 @@ export default function ControlPage() {
                 )}
               </StepCard>
 
+              {/* ── BLOQUE 2: ML LAB ────────────────────────────────── */}
+              <div className="flex items-center gap-3 mt-2 mb-1">
+                <div className="h-px flex-1 bg-gray-100" />
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">ML Lab</span>
+                <div className="h-px flex-1 bg-gray-100" />
+              </div>
+
+              {/* PASO 4 — ML: Reglas de precio */}
+              <StepCard
+                num={4}
+                done={hasMLPrices}
+                active={firstAllActiveIdx === 3}
+                locked={!coreDone}
+                title="Importar reglas de precio ML"
+                subtitle="Lista de precios Odoo → MercadoLibre"
+                desc="En ML Lab → Importar, subí el Excel de reglas de precio de MercadoLibre exportado desde Odoo. Vincula cada producto con su precio publicado en ML y calcula el margen real después de comisiones."
+                href="/mercadolibre"
+                cta="Ir a ML Lab"
+              >
+                {hasMLPrices ? (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-success/5 rounded-lg text-[12px]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                    <span className="font-semibold text-success">{mlProducts} productos con regla de precio</span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 rounded-lg text-[12px]">
+                    <Tag className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
+                    <span className="text-blue-600">
+                      Odoo → Inventario → Listas de precios → MercadoLibre → Exportar Excel
+                    </span>
+                  </div>
+                )}
+              </StepCard>
+
+              {/* PASO 5 — ML: Publicaciones */}
+              <StepCard
+                num={5}
+                done={hasMLPubs}
+                active={firstAllActiveIdx === 4}
+                locked={!coreDone}
+                title="Importar publicaciones de ML"
+                subtitle="Seller Center → exportación masiva"
+                desc="Exportá el reporte de publicaciones desde tu cuenta de MercadoLibre e importalo en ML Lab. Trae el estado, ventas y visitas de cada ítem publicado."
+                href="/mercadolibre"
+                cta="Ir a ML Lab"
+              >
+                {hasMLPubs ? (
+                  <div className="flex items-center gap-2 px-3 py-2 bg-success/5 rounded-lg text-[12px]">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                    <span className="font-semibold text-success">{mlWithId} publicaciones con ID de ML</span>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 px-3 py-2 bg-yellow-50 rounded-lg text-[12px]">
+                    <ShoppingCart className="w-3.5 h-3.5 text-yellow-600 mt-0.5 shrink-0" />
+                    <span className="text-yellow-700">
+                      mercadolibre.com.ar → Publicaciones → Administrar → Descargar reporte
+                    </span>
+                  </div>
+                )}
+              </StepCard>
+
+              {/* PASO 6 — API Keys */}
+              <StepCard
+                num={6}
+                done={false}
+                active={firstAllActiveIdx === 5}
+                locked={!coreDone}
+                title="Configurar credenciales de API"
+                subtitle="Anthropic · MercadoLibre"
+                desc="Para que el Consultor IA y el Escáner de competencia funcionen, configurá las API keys en .env.local. Sin estas claves el consultor y el escáner no responden."
+                href="/mercadolibre"
+                cta="Ver ML Lab"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 px-3 py-2 bg-gray-50 rounded-lg text-[12px]">
+                    <Key className="w-3.5 h-3.5 text-gray-500 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="font-semibold text-gray-700">ANTHROPIC_API_KEY</span>
+                      <span className="text-gray-400 ml-2">→ console.anthropic.com</span>
+                      <p className="text-gray-400 mt-0.5">Para el Consultor IA y generador de descripciones.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 px-3 py-2 bg-gray-50 rounded-lg text-[12px]">
+                    <Key className="w-3.5 h-3.5 text-gray-500 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="font-semibold text-gray-700">ML_APP_ID + ML_APP_SECRET</span>
+                      <span className="text-gray-400 ml-2">→ developers.mercadolibre.com.ar</span>
+                      <p className="text-gray-400 mt-0.5">Para buscar competidores en ML en tiempo real.</p>
+                    </div>
+                  </div>
+                </div>
+              </StepCard>
+
             </div>
 
             {/* Tip */}
@@ -414,45 +601,151 @@ export default function ControlPage() {
               <p className="text-[12px] text-acqua leading-relaxed">
                 <strong>Una sola vez:</strong> una vez que importás los datos de Odoo, el sistema los recuerda.
                 Las actualizaciones futuras solo requieren subir la lista nueva del proveedor — el resto es automático.
+                Los pasos 4 y 5 son independientes: podés hacerlos en cualquier orden una vez que tengás la base cargada.
               </p>
             </div>
-          </div>
 
-          {/* Si ya tienen proveedores/productos aunque no todo completo, mostrar accesos */}
-          {(s.hasSuppliers || s.hasProducts) && (
-            <div className="mt-8 max-w-2xl">
-              <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Acceso rápido</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {[
-                  { label: 'Proveedores', icon: Users,          href: '/proveedores', sub: `${s.totalSuppliers}` },
-                  { label: 'Productos',   icon: Package,         href: '/productos',   sub: `${s.totalProducts}` },
-                  { label: 'Costos',      icon: DollarSign,      href: '/costos',      sub: '' },
-                  { label: 'Parámetros',  icon: Settings,        href: '/parametros',  sub: '' },
-                  { label: 'Rentabilidad',icon: TrendingDown,    href: '/rentabilidad',sub: '' },
-                  { label: 'Export Odoo', icon: FileSpreadsheet, href: '/export-odoo', sub: '' },
-                ].map((a, i) => {
-                  const Icon = a.icon;
-                  return (
-                    <a key={i} href={a.href}
-                      className="flex items-center gap-2 bg-white border border-gray-100 rounded-xl px-3 py-2.5 hover:border-acqua/30 hover:shadow-sm transition-all group">
-                      <div className="w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 group-hover:bg-acqua/10 transition-colors">
-                        <Icon className="w-3.5 h-3.5 text-gray-500 group-hover:text-acqua transition-colors" />
-                      </div>
-                      <div>
-                        <div className="text-[12px] font-semibold text-gray-800">{a.label}</div>
-                        {a.sub && <div className="text-[10px] text-gray-400">{a.sub}</div>}
-                      </div>
-                    </a>
-                  );
-                })}
+            {/* Acceso rápido si ya hay algo */}
+            {hasAnyData && (
+              <div className="mt-8">
+                <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">Acceso rápido</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { label: 'Proveedores',   icon: Users,          href: '/proveedores',  sub: `${s.totalSuppliers}` },
+                    { label: 'Productos',     icon: Package,         href: '/productos',    sub: `${s.totalProducts}` },
+                    { label: 'Costos',        icon: DollarSign,      href: '/costos',       sub: '' },
+                    { label: 'Parámetros',    icon: Settings,        href: '/parametros',   sub: '' },
+                    { label: 'Rentabilidad',  icon: TrendingDown,    href: '/rentabilidad', sub: '' },
+                    { label: 'Export Odoo',   icon: FileSpreadsheet, href: '/export-odoo',  sub: '' },
+                  ].map((a, i) => {
+                    const Icon = a.icon;
+                    return (
+                      <a key={i} href={a.href}
+                        className="flex items-center gap-2 bg-white border border-gray-100 rounded-xl px-3 py-2.5 hover:border-acqua/30 hover:shadow-sm transition-all group">
+                        <div className="w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 group-hover:bg-acqua/10 transition-colors">
+                          <Icon className="w-3.5 h-3.5 text-gray-500 group-hover:text-acqua transition-colors" />
+                        </div>
+                        <div>
+                          <div className="text-[12px] font-semibold text-gray-800">{a.label}</div>
+                          {a.sub && <div className="text-[10px] text-gray-400">{a.sub}</div>}
+                        </div>
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── DASHBOARD — cuando ya hay todos los datos ──────────────── */}
-      {s.allDone && <Dashboard s={s} />}
+      {/* ── DASHBOARD + PRÓXIMOS PASOS — cuando base está cargada ─── */}
+      {coreDone && (
+        <>
+          <Dashboard s={s} />
+
+          {/* Próximos pasos: ML Lab */}
+          <div className="px-4 lg:px-6 mb-10">
+            <div className="max-w-2xl">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 mb-0.5">
+                    Próximos pasos — ML Lab
+                  </h2>
+                  <p className="text-[13px] text-gray-500">
+                    Conectá MercadoLibre para analizar rentabilidad real, competencia y mejorar publicaciones.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+
+                {/* PASO 4 — ML Precios */}
+                <StepCard
+                  num={4}
+                  done={hasMLPrices}
+                  active={!hasMLPrices}
+                  title="Importar reglas de precio ML"
+                  subtitle="Lista de precios Odoo → MercadoLibre"
+                  desc="En ML Lab → Importar, subí el Excel de reglas de precio de MercadoLibre exportado desde Odoo. Vincula cada producto con su precio publicado y calcula el margen real después de comisiones."
+                  href="/mercadolibre"
+                  cta="Ir a ML Lab"
+                >
+                  {hasMLPrices ? (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-success/5 rounded-lg text-[12px]">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                      <span className="font-semibold text-success">{mlProducts} productos cargados</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 rounded-lg text-[12px]">
+                      <Tag className="w-3.5 h-3.5 text-blue-400 mt-0.5 shrink-0" />
+                      <span className="text-blue-600">
+                        Odoo → Inventario → Listas de precios → MercadoLibre → Exportar Excel
+                      </span>
+                    </div>
+                  )}
+                </StepCard>
+
+                {/* PASO 5 — ML Publicaciones */}
+                <StepCard
+                  num={5}
+                  done={hasMLPubs}
+                  active={hasMLPrices && !hasMLPubs}
+                  title="Importar publicaciones de ML"
+                  subtitle="Seller Center → exportación masiva"
+                  desc="Exportá el reporte de publicaciones desde tu cuenta de MercadoLibre e importalo en ML Lab. Trae el estado, ventas y visitas de cada ítem publicado para analizarlos junto al margen."
+                  href="/mercadolibre"
+                  cta="Ir a ML Lab"
+                >
+                  {hasMLPubs ? (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-success/5 rounded-lg text-[12px]">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0" />
+                      <span className="font-semibold text-success">{mlWithId} publicaciones activas</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-2 px-3 py-2 bg-yellow-50 rounded-lg text-[12px]">
+                      <ShoppingCart className="w-3.5 h-3.5 text-yellow-600 mt-0.5 shrink-0" />
+                      <span className="text-yellow-700">
+                        mercadolibre.com.ar → Publicaciones → Administrar → Descargar reporte
+                      </span>
+                    </div>
+                  )}
+                </StepCard>
+
+                {/* PASO 6 — API Keys */}
+                <StepCard
+                  num={6}
+                  done={false}
+                  active={false}
+                  title="Configurar credenciales de API"
+                  subtitle="Anthropic · MercadoLibre"
+                  desc="Para el Consultor IA y el Escáner de competencia, configurá las API keys en .env.local. Ambas claves son gratuitas para empezar."
+                  href="/mercadolibre"
+                  cta="Ver ML Lab"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2 px-3 py-2 bg-gray-50 rounded-lg text-[12px]">
+                      <Key className="w-3.5 h-3.5 text-gray-500 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="font-semibold text-gray-700">ANTHROPIC_API_KEY</span>
+                        <span className="text-gray-400 ml-2">→ console.anthropic.com</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 px-3 py-2 bg-gray-50 rounded-lg text-[12px]">
+                      <Key className="w-3.5 h-3.5 text-gray-500 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="font-semibold text-gray-700">ML_APP_ID + ML_APP_SECRET</span>
+                        <span className="text-gray-400 ml-2">→ developers.mercadolibre.com.ar</span>
+                      </div>
+                    </div>
+                  </div>
+                </StepCard>
+
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
     </div>
     </div>
