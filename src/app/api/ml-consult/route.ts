@@ -1,10 +1,76 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 
-const client = new Anthropic();
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini helper — streaming via REST (sin dependencia extra)
+// ─────────────────────────────────────────────────────────────────────────────
+const GEMINI_MODEL = 'gemini-2.0-flash';
+
+interface GeminiPart   { text: string }
+interface GeminiContent { role: 'user' | 'model'; parts: GeminiPart[] }
+
+async function streamGemini(
+  apiKey: string,
+  systemPrompt: string,
+  messages: GeminiContent[],
+  maxTokens = 512,
+): Promise<ReadableStream<Uint8Array>> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents: messages,
+      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const err = await response.text().catch(() => response.statusText);
+    throw new Error(`Gemini ${response.status}: ${err}`);
+  }
+
+  const body = response.body;
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader  = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Procesar líneas SSE completas
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const json = line.slice(6).trim();
+            if (!json || json === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(json) as {
+                candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+              };
+              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) controller.enqueue(new TextEncoder().encode(text));
+            } catch { /* ignorar chunks incompletos */ }
+          }
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types (keep lightweight — don't import from client-only modules)
+// Types
 // ─────────────────────────────────────────────────────────────────────────────
 interface CalcContext {
   price: number;
@@ -161,9 +227,10 @@ INSTRUCCIONES DE COMPORTAMIENTO
 // Route handler
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
     return NextResponse.json(
-      { error: 'ANTHROPIC_API_KEY no configurada. Agregala en .env.local' },
+      { error: 'GEMINI_API_KEY no configurada. Conseguila gratis en aistudio.google.com y agregala en Vercel → Settings → Environment Variables.' },
       { status: 500 },
     );
   }
@@ -183,32 +250,16 @@ export async function POST(req: NextRequest) {
     consultantScore, consultantStrategy, consultantStrategyLabel,
   );
 
+  // Convertir mensajes al formato Gemini (assistant → model)
+  const geminiMessages: GeminiContent[] = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
+
   try {
-    const stream = client.messages.stream({
-      model: 'claude-opus-4-5',
-      max_tokens: 512,
-      system: systemPrompt,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-    });
+    const stream = await streamGemini(apiKey, systemPrompt, geminiMessages, 512);
 
-    const readableStream = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const event of stream) {
-            if (
-              event.type === 'content_block_delta' &&
-              event.delta.type === 'text_delta'
-            ) {
-              controller.enqueue(new TextEncoder().encode(event.delta.text));
-            }
-          }
-        } finally {
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(readableStream, {
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache',
@@ -217,6 +268,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error('[ml-consult]', err);
-    return NextResponse.json({ error: 'Error al llamar a Claude' }, { status: 500 });
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

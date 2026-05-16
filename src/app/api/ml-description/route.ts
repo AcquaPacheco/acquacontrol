@@ -1,8 +1,77 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 
-const client = new Anthropic();
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini helper — streaming via REST (sin dependencia extra)
+// ─────────────────────────────────────────────────────────────────────────────
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
+interface GeminiContent { role: 'user' | 'model'; parts: Array<{ text: string }> }
+
+async function streamGemini(
+  apiKey: string,
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens = 1000,
+): Promise<ReadableStream<Uint8Array>> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
+  const contents: GeminiContent[] = [{ role: 'user', parts: [{ text: userMessage }] }];
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
+    }),
+  });
+
+  if (!response.ok || !response.body) {
+    const err = await response.text().catch(() => response.statusText);
+    throw new Error(`Gemini ${response.status}: ${err}`);
+  }
+
+  const body = response.body;
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader  = body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const json = line.slice(6).trim();
+            if (!json || json === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(json) as {
+                candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+              };
+              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) controller.enqueue(new TextEncoder().encode(text));
+            } catch { /* ignorar chunks incompletos */ }
+          }
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 interface CompetitorItem {
   title: string;
   price: number;
@@ -25,9 +94,16 @@ interface RequestBody {
   recommendedPrice?: number;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Route handler
+// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY no configurada' }, { status: 500 });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'GEMINI_API_KEY no configurada. Conseguila gratis en aistudio.google.com y agregala en Vercel → Settings → Environment Variables.' },
+      { status: 500 },
+    );
   }
 
   let body: RequestBody;
@@ -132,28 +208,9 @@ ${competitorText}
 Generá la publicación siguiendo estrictamente las políticas de ML Argentina.`;
 
   try {
-    const stream = client.messages.stream({
-      model: 'claude-opus-4-5',
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
-    });
+    const stream = await streamGemini(apiKey, systemPrompt, userMessage, 1000);
 
-    const readableStream = new ReadableStream({
-      async start(controller) {
-        try {
-          for await (const event of stream) {
-            if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-              controller.enqueue(new TextEncoder().encode(event.delta.text));
-            }
-          }
-        } finally {
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(readableStream, {
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache',
@@ -162,6 +219,6 @@ Generá la publicación siguiendo estrictamente las políticas de ML Argentina.`
     });
   } catch (err) {
     console.error('[ml-description]', err);
-    return NextResponse.json({ error: 'Error al llamar a Claude' }, { status: 500 });
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

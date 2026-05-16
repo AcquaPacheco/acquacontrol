@@ -1,38 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// ─── ML App Token cache (in-memory, valid 6h) ─────────────────────────────────
-let _cachedToken: string | null = null;
-let _tokenExpiresAt = 0;
-
-async function getMLToken(): Promise<string | null> {
-  const appId     = process.env.ML_APP_ID;
-  const appSecret = process.env.ML_APP_SECRET;
-  if (!appId || !appSecret) return null;
-
-  // Return cached token if still valid (with 5min margin)
-  if (_cachedToken && Date.now() < _tokenExpiresAt - 5 * 60 * 1000) {
-    return _cachedToken;
-  }
-
-  try {
-    const res = await fetch('https://api.mercadolibre.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-      body: new URLSearchParams({
-        grant_type:    'client_credentials',
-        client_id:     appId,
-        client_secret: appSecret,
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json() as { access_token: string; expires_in: number };
-    _cachedToken     = data.access_token;
-    _tokenExpiresAt  = Date.now() + (data.expires_in ?? 21600) * 1000;
-    return _cachedToken;
-  } catch {
-    return null;
-  }
-}
+// ML Search usa la API pública de MercadoLibre — no requiere credenciales
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface MLItem {
@@ -77,29 +45,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Query too short' }, { status: 400 });
   }
 
-  // Check credentials
-  const token = await getMLToken();
-  if (!token) {
-    return NextResponse.json({
-      ok: false,
-      needsCredentials: true,
-      error: 'Faltan credenciales de MercadoLibre. Configurá ML_APP_ID y ML_APP_SECRET en .env.local',
-    }, { status: 401 });
-  }
-
   try {
     const url = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(q)}&limit=${limit}&sort=relevance`;
     const res = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
+      headers: { 'Accept': 'application/json' },
       next: { revalidate: 300 },
     });
 
     if (!res.ok) {
-      // If token expired unexpectedly, clear cache
-      if (res.status === 401) _cachedToken = null;
       return NextResponse.json(
         { ok: false, error: `ML API error: ${res.status}` },
         { status: res.status },
@@ -109,7 +62,7 @@ export async function GET(req: NextRequest) {
     const data = (await res.json()) as MLSearchResponse;
 
     // Sellers to exclude (own store — apacheco.tienda, etc.)
-    const EXCLUDED_BASE = ['apacheco', 'apacheco.tienda'];
+    const EXCLUDED_BASE = ['apacheco', 'apacheco.tienda', 'acquapacheco'];
     if (exclude) EXCLUDED_BASE.push(...exclude.toLowerCase().split(','));
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
