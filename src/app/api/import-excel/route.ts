@@ -584,32 +584,64 @@ function findHeaderRow(rows: unknown[][]): number {
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
-    const file = formData.get('file') as File | null;
+    const contentType = req.headers.get('content-type') ?? '';
 
-    if (!file) {
-      return NextResponse.json({ ok: false, error: 'No se recibió ningún archivo' }, { status: 400 });
+    let typeParam:         SheetType | null = null;
+    let supplierNameParam: string = '';
+    let supplierSlugParam: string = '';
+    let dryRun:            boolean = false;
+    let stockDate:         string  = new Date().toISOString().split('T')[0];
+    let allRawSheets:      Array<{ name: string; rows: unknown[][] }> = [];
+
+    if (contentType.includes('application/json')) {
+      // ── Modo JSON: el cliente ya parseó el Excel en el browser ──────────────
+      const body = await req.json() as {
+        type?: string;
+        supplierName?: string;
+        supplierSlug?: string;
+        dryRun?: boolean;
+        stockDate?: string;
+        sheets?: Array<{ name: string; rows: unknown[][] }>;
+      };
+      typeParam         = (body.type?.toLowerCase() as SheetType | null) ?? null;
+      supplierNameParam = body.supplierName?.trim() ?? '';
+      supplierSlugParam = body.supplierSlug?.trim() ?? toSlug(supplierNameParam);
+      dryRun            = body.dryRun ?? false;
+      stockDate         = body.stockDate ?? stockDate;
+      allRawSheets      = body.sheets ?? [];
+
+    } else {
+      // ── Modo FormData: recibe el archivo directamente (entorno local) ───────
+      const formData = await req.formData();
+      const file = formData.get('file') as File | null;
+      if (!file) {
+        return NextResponse.json({ ok: false, error: 'No se recibió ningún archivo' }, { status: 400 });
+      }
+
+      const buffer   = Buffer.from(await file.arrayBuffer());
+      const workbook = read(buffer, { type: 'buffer', cellDates: true });
+
+      typeParam         = (formData.get('type') as string | null)?.toLowerCase() as SheetType | null ?? null;
+      supplierNameParam = (formData.get('supplierName') as string | null)?.trim() ?? '';
+      supplierSlugParam = (formData.get('supplierSlug') as string | null)?.trim() ?? toSlug(supplierNameParam);
+      dryRun            = formData.get('dryRun') === 'true';
+      stockDate         = (formData.get('stockDate') as string | null)?.trim() ?? stockDate;
+
+      for (const sheetName of workbook.SheetNames) {
+        const sheet   = workbook.Sheets[sheetName];
+        const rawRows = utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
+        allRawSheets.push({ name: sheetName, rows: rawRows });
+      }
     }
 
-    const buffer   = Buffer.from(await file.arrayBuffer());
-    const workbook = read(buffer, { type: 'buffer', cellDates: true });
+    if (allRawSheets.length === 0) {
+      return NextResponse.json({ ok: false, error: 'No se recibieron hojas con datos' }, { status: 400 });
+    }
 
     const results: ParseResult[] = [];
 
-    // Parámetros opcionales del form
-    const typeParam         = (formData.get('type') as string | null)?.toLowerCase() as SheetType | null;
-    const supplierNameParam = (formData.get('supplierName') as string | null)?.trim() ?? '';
-    const supplierSlugParam = (formData.get('supplierSlug') as string | null)?.trim() ?? toSlug(supplierNameParam);
-    const dryRun            = formData.get('dryRun') === 'true';
-    // Fecha del snapshot de stock (default: hoy)
-    const stockDate         = (formData.get('stockDate') as string | null)?.trim()
-                              ?? new Date().toISOString().split('T')[0];
-
-    for (const sheetName of workbook.SheetNames) {
-      const sheet   = workbook.Sheets[sheetName];
-      const rawRows = utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
-
-      if (rawRows.length < 2) continue;
+    for (const { name: sheetName, rows: rawRows } of allRawSheets) {
+      if (!rawRows || rawRows.length < 2) continue;
 
       const headerIdx    = findHeaderRow(rawRows);
       const headers      = (rawRows[headerIdx] as unknown[]).map(norm);

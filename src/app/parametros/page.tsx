@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { cn } from '@/lib/utils';
 import {
   Settings, DollarSign, Percent, CreditCard, ListOrdered,
@@ -813,6 +814,31 @@ function SeccionRedondeo() {
   );
 }
 
+// ── Helper: parsea el Excel en el browser y envía JSON al servidor
+// Evita el límite de 4.5 MB de Vercel para uploads de archivos
+async function callImportExcel(
+  file: File,
+  params: { type: string; supplierName?: string; supplierSlug?: string; dryRun?: boolean; stockDate?: string },
+) {
+  const buffer   = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+  const sheets   = workbook.SheetNames.map(name => ({
+    name,
+    rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: '', blankrows: false }),
+  }));
+  const res = await fetch('/api/import-excel', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ ...params, sheets }),
+  });
+  if (!res.ok) {
+    // El servidor puede devolver un JSON de error o texto plano
+    const text = await res.text();
+    try { return JSON.parse(text) as Record<string, unknown>; } catch { throw new Error(text); }
+  }
+  return res.json() as Promise<Record<string, unknown>>;
+}
+
 // ── Componente: Importar productos desde Odoo
 type ImportPhase = 'idle' | 'selected' | 'previewing' | 'preview_ok' | 'importing' | 'done' | 'error';
 
@@ -839,12 +865,7 @@ function ImportProductsSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('previewing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'products');
-      fd.append('dryRun', 'true');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
+      const data = await callImportExcel(file, { type: 'products', dryRun: true }) as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setPreview(data.sheets?.[0] ?? null);
       setPhase('preview_ok');
@@ -858,11 +879,7 @@ function ImportProductsSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('importing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'products');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; summary?: { stats: { imported: number; skipped: number } }[]; error?: string };
+      const data = await callImportExcel(file, { type: 'products' }) as { ok: boolean; summary?: { stats: { imported: number; skipped: number } }[]; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       const stats = data.summary?.[0]?.stats;
       setResult({ imported: stats?.imported ?? 0, skipped: stats?.skipped ?? 0 });
@@ -1063,12 +1080,7 @@ function ImportSupplierinfoSection({ onImported }: { onImported?: () => void }) 
     if (!file) return;
     setPhase('previewing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'supplierinfo');
-      fd.append('dryRun', 'true');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; sheets?: (ImportPreviewSheet & { groupCount?: number; groupSample?: { name: string; count: number }[] })[]; error?: string };
+      const data = await callImportExcel(file, { type: 'supplierinfo', dryRun: true }) as { ok: boolean; sheets?: (ImportPreviewSheet & { groupCount?: number; groupSample?: { name: string; count: number }[] })[]; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setPreview(data.sheets?.[0] ?? null);
       setPhase('preview_ok');
@@ -1082,11 +1094,7 @@ function ImportSupplierinfoSection({ onImported }: { onImported?: () => void }) 
     if (!file) return;
     setPhase('importing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'supplierinfo');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; written?: { supplierinfo?: number; supplierinfo_products?: number }; error?: string };
+      const data = await callImportExcel(file, { type: 'supplierinfo' }) as { ok: boolean; written?: { supplierinfo?: number; supplierinfo_products?: number }; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setResult({ groups: data.written?.supplierinfo ?? 0, products: data.written?.supplierinfo_products ?? 0 });
       setPhase('done');
@@ -1249,12 +1257,7 @@ function ImportContactsSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('previewing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'contacts');
-      fd.append('dryRun', 'true');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
+      const data = await callImportExcel(file, { type: 'contacts', dryRun: true }) as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setPreview(data.sheets?.[0] ?? null);
       setPhase('preview_ok');
@@ -1268,11 +1271,7 @@ function ImportContactsSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('importing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'contacts');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; written?: { contacts?: number }; error?: string };
+      const data = await callImportExcel(file, { type: 'contacts' }) as { ok: boolean; written?: { contacts?: number }; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setResult(data.written?.contacts ?? 0);
       setPhase('done');
@@ -1428,12 +1427,7 @@ function ImportStockSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('previewing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'stock');
-      fd.append('dryRun', 'true');
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
+      const data = await callImportExcel(file, { type: 'stock', dryRun: true }) as { ok: boolean; sheets?: ImportPreviewSheet[]; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setPreview(data.sheets?.[0] ?? null);
       setPhase('preview_ok');
@@ -1447,12 +1441,7 @@ function ImportStockSection({ onImported }: { onImported?: () => void }) {
     if (!file) return;
     setPhase('importing');
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('type', 'stock');
-      fd.append('stockDate', new Date().toISOString().split('T')[0]);
-      const res  = await fetch('/api/import-excel', { method: 'POST', body: fd });
-      const data = await res.json() as { ok: boolean; written?: { stock?: number }; error?: string };
+      const data = await callImportExcel(file, { type: 'stock', stockDate: new Date().toISOString().split('T')[0] }) as { ok: boolean; written?: { stock?: number }; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error');
       setResult(data.written?.stock ?? 0);
       setPhase('done');
