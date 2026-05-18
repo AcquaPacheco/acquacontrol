@@ -283,13 +283,30 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') ?? '';
 
     if (contentType.includes('application/json')) {
-      // Nuevo formato: cliente ya parseó el Excel y manda las filas como JSON
-      const body = await req.json() as { rows: unknown[][]; supplierSlug: string; supplierName: string };
+      // Nuevo formato: cliente ya parseó el Excel y manda las hojas como JSON
+      const body = await req.json() as {
+        sheets?: Array<{ name: string; rows: unknown[][] }>;
+        rows?: unknown[][];
+        supplierSlug: string;
+        supplierName: string;
+      };
       supplierSlug = (body.supplierSlug ?? '').trim();
       supplierName = (body.supplierName ?? '').trim();
-      const result = parseSupplierRows(body.rows ?? []);
-      newItems = result.items;
-      diag     = result.diag;
+
+      // Combinar items de todas las hojas
+      const allItems: RawItem[] = [];
+      let lastDiag: ParseDiag = { headerRow: 0, headers: [], codeCol: -1, nameCol: -1, priceCol: -1, uxbCol: -1, totalRows: 0, itemsWithPrice: 0, itemsNoPrice: 0 };
+
+      const sheetList = body.sheets ?? (body.rows ? [{ name: 'Sheet1', rows: body.rows }] : []);
+      for (const sheet of sheetList) {
+        const result = parseSupplierRows(sheet.rows ?? []);
+        if (result.items.length > 0) {
+          allItems.push(...result.items);
+          lastDiag = result.diag;
+        }
+      }
+      newItems = allItems;
+      diag     = lastDiag;
     } else {
       // Formato legacy: FormData con archivo
       const formData = await req.formData();

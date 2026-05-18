@@ -613,15 +613,18 @@ function ComparePriceModal({
     setPhase('comparing');
     try {
       // Parsear el Excel en el browser (evita el límite de 4.5MB de Vercel)
+      // Se envían TODAS las hojas para capturar catálogos multi-hoja (ej: Vulcano)
       const buffer   = await newFile.arrayBuffer();
       const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-      const sheet    = workbook.Sheets[workbook.SheetNames[0]];
-      const rows     = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
+      const sheets   = workbook.SheetNames.map(name => ({
+        name,
+        rows: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: '', blankrows: false }),
+      }));
 
       const res = await fetch('/api/compare-pricelists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows, supplierSlug, supplierName }),
+        body: JSON.stringify({ sheets, supplierSlug, supplierName }),
       });
       const data = await res.json() as CompareResult & { ok: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error desconocido');
