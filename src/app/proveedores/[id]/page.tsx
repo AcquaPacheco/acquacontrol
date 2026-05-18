@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import * as XLSX from 'xlsx';
 import { saveSupplierOverride, loadSupplierOverride } from '@/lib/use-local-storage';
 import type { Supplier, SupplierStatus } from '@/types';
 
@@ -611,11 +612,17 @@ function ComparePriceModal({
     if (!newFile) return;
     setPhase('comparing');
     try {
-      const fd = new FormData();
-      fd.append('newFile', newFile);
-      fd.append('supplierSlug', supplierSlug);
-      fd.append('supplierName', supplierName);
-      const res  = await fetch('/api/compare-pricelists', { method: 'POST', body: fd });
+      // Parsear el Excel en el browser (evita el límite de 4.5MB de Vercel)
+      const buffer   = await newFile.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const sheet    = workbook.Sheets[workbook.SheetNames[0]];
+      const rows     = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
+
+      const res = await fetch('/api/compare-pricelists', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows, supplierSlug, supplierName }),
+      });
       const data = await res.json() as CompareResult & { ok: boolean; error?: string };
       if (!data.ok) throw new Error(data.error ?? 'Error desconocido');
       setResults(data);

@@ -118,19 +118,14 @@ interface ParseDiag {
   itemsNoPrice: number;
 }
 
-function parseSupplierExcel(buffer: Buffer): { items: RawItem[]; diag: ParseDiag } {
-  const workbook = read(buffer, { type: 'buffer', cellDates: true });
+function parseSupplierRows(rawRows: unknown[][]): { items: RawItem[]; diag: ParseDiag } {
   const items: RawItem[] = [];
   let diag: ParseDiag = {
     headerRow: 0, headers: [], codeCol: -1, nameCol: -1, priceCol: -1, uxbCol: -1,
     totalRows: 0, itemsWithPrice: 0, itemsNoPrice: 0,
   };
-
-  // Try each sheet, return first with data
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const rawRows = utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
-    if (rawRows.length < 3) continue;
+  if (rawRows.length < 3) return { items, diag };
+  {
 
     const headerIdx = findHeaderRow(rawRows);
     const headers   = (rawRows[headerIdx] as unknown[]).map(norm);
@@ -156,8 +151,8 @@ function parseSupplierExcel(buffer: Buffer): { items: RawItem[]; diag: ParseDiag
       'uxb', 'ux b', 'unid x bulto', 'cant min', 'minimo', 'caja', 'bulto', 'x caja',
     ]);
 
-    // If neither code nor name detected, skip this sheet
-    if (codeIdx === -1 && nameIdx === -1) continue;
+    // If neither code nor name detected, return empty
+    if (codeIdx === -1 && nameIdx === -1) return { items, diag };
 
     // If no price column detected, try heuristic
     let effectivePriceIdx = priceIdx;
@@ -198,10 +193,20 @@ function parseSupplierExcel(buffer: Buffer): { items: RawItem[]; diag: ParseDiag
     diag.itemsWithPrice = itemsWithPrice;
     diag.itemsNoPrice   = itemsNoPrice;
 
-    if (items.length > 0) break;
   }
 
   return { items, diag };
+}
+
+function parseSupplierExcel(buffer: Buffer): { items: RawItem[]; diag: ParseDiag } {
+  const workbook = read(buffer, { type: 'buffer', cellDates: true });
+  for (const sheetName of workbook.SheetNames) {
+    const sheet   = workbook.Sheets[sheetName];
+    const rawRows = utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false });
+    const result  = parseSupplierRows(rawRows);
+    if (result.items.length > 0) return result;
+  }
+  return { items: [], diag: { headerRow: 0, headers: [], codeCol: -1, nameCol: -1, priceCol: -1, uxbCol: -1, totalRows: 0, itemsWithPrice: 0, itemsNoPrice: 0 } };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -270,18 +275,35 @@ export interface DiffItem {
 
 export async function POST(req: NextRequest) {
   try {
-    const formData    = await req.formData();
-    const newFile     = formData.get('newFile') as File | null;
-    const supplierSlug = (formData.get('supplierSlug') as string | null)?.trim() ?? '';
-    const supplierName = (formData.get('supplierName') as string | null)?.trim() ?? '';
+    let newItems: RawItem[];
+    let diag: ParseDiag;
+    let supplierSlug: string;
+    let supplierName: string;
 
-    if (!newFile) {
-      return NextResponse.json({ ok: false, error: 'Se requiere el archivo de la lista (newFile)' }, { status: 400 });
+    const contentType = req.headers.get('content-type') ?? '';
+
+    if (contentType.includes('application/json')) {
+      // Nuevo formato: cliente ya parseó el Excel y manda las filas como JSON
+      const body = await req.json() as { rows: unknown[][]; supplierSlug: string; supplierName: string };
+      supplierSlug = (body.supplierSlug ?? '').trim();
+      supplierName = (body.supplierName ?? '').trim();
+      const result = parseSupplierRows(body.rows ?? []);
+      newItems = result.items;
+      diag     = result.diag;
+    } else {
+      // Formato legacy: FormData con archivo
+      const formData = await req.formData();
+      const newFile  = formData.get('newFile') as File | null;
+      supplierSlug   = (formData.get('supplierSlug') as string | null)?.trim() ?? '';
+      supplierName   = (formData.get('supplierName') as string | null)?.trim() ?? '';
+      if (!newFile) {
+        return NextResponse.json({ ok: false, error: 'Se requiere el archivo de la lista (newFile)' }, { status: 400 });
+      }
+      const newBuffer = Buffer.from(await newFile.arrayBuffer());
+      const result    = parseSupplierExcel(newBuffer);
+      newItems = result.items;
+      diag     = result.diag;
     }
-
-    // ── Parse new list ────────────────────────────────────────────────────────
-    const newBuffer        = Buffer.from(await newFile.arrayBuffer());
-    const { items: newItems, diag } = parseSupplierExcel(newBuffer);
     const priced = newItems.filter(i => i.price > 0);
 
     if (priced.length === 0) {
