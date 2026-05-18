@@ -1155,57 +1155,120 @@ interface CatalogItem {
   source: 'excel' | 'ai';
 }
 
-function parseCatalogSheets(sheets: { name: string; rows: unknown[][] }[]): CatalogItem[] {
-  const items: CatalogItem[] = [];
+// ── Helpers compartidos de parsing ─────────────────────────────────────────
+function buildMatchMaps(supplierProductCodes?: string[]) {
   const byCode = new Map<string, { id: string; name: string; cost: number; price: number }>();
   const byName = new Map<string, { id: string; name: string; cost: number; price: number }>();
   (productsData as Array<{ id: string; supplierCode: string | null; name: string; cost: number; price: number }>).forEach(p => {
     if (p.supplierCode) byCode.set(p.supplierCode.trim().toLowerCase(), { id: p.id, name: p.name, cost: p.cost, price: p.price });
     byName.set(p.name.trim().toLowerCase(), { id: p.id, name: p.name, cost: p.cost, price: p.price });
   });
-  const norm    = (v: unknown) => String(v ?? '').trim();
-  const toNum   = (v: unknown) => { const n = parseFloat(String(v ?? '').replace(',','.')); return isFinite(n) && n > 0 ? n : 0; };
-  const isNumId = (v: unknown) => { const n = Number(v); return isFinite(n) && n > 0; };
+  // También indexar por los códigos directos del proveedor en Odoo
+  if (supplierProductCodes) {
+    supplierProductCodes.forEach(code => {
+      if (code && !byCode.has(code.toLowerCase())) {
+        const found = (productsData as Array<{ id: string; supplierCode: string | null; name: string; cost: number; price: number }>)
+          .find(p => p.supplierCode?.toLowerCase() === code.toLowerCase());
+        if (found) byCode.set(code.toLowerCase(), { id: found.id, name: found.name, cost: found.cost, price: found.price });
+      }
+    });
+  }
+  return { byCode, byName };
+}
+
+function parseCatalogSheets(
+  sheets: { name: string; rows: unknown[][] }[],
+  supplierProductCodes?: string[],
+): CatalogItem[] {
+  const items: CatalogItem[] = [];
+  const { byCode, byName } = buildMatchMaps(supplierProductCodes);
+
+  const norm  = (v: unknown) => String(v ?? '').trim();
+  const toNum = (v: unknown) => { const n = parseFloat(String(v ?? '').replace(',','.')); return isFinite(n) && n > 0 ? n : 0; };
+
+  // Acepta códigos numéricos puros (102006) Y alfanuméricos cortos con dígitos (V-102001, M-1828, N-750)
+  const isProductCode = (v: unknown): boolean => {
+    const s = norm(v);
+    if (!s || s.length > 20) return false;
+    if (/^\d+$/.test(s)) return true;                          // puramente numérico
+    if (/^[A-Z]{1,3}-\d+$/i.test(s)) return true;             // prefijo letra + guion + número: V-102001
+    if (/^[A-Z]\d+$/i.test(s)) return true;                    // letra + número: M1828
+    return false;
+  };
+
+  // Detecta la fila de encabezado para encontrar las columnas correctas
+  const detectColumns = (rows: unknown[][]): { codeCol: number; descCol: number; priceCol: number; unitCol: number; packCol: number } => {
+    for (let i = 0; i < Math.min(10, rows.length); i++) {
+      const row = rows[i] as unknown[];
+      if (!row) continue;
+      for (let c = 0; c < row.length; c++) {
+        const cell = norm(row[c]).toLowerCase();
+        if (cell === 'código' || cell === 'codigo' || cell === 'cod.' || cell === 'cod') {
+          // Encontramos la columna de código; detectar las demás relativas
+          const descCol  = row.slice(c+1).findIndex(v => { const s = norm(v).toLowerCase(); return s.includes('descri') || s.includes('produc') || s.includes('articulo') || s.includes('artículo'); });
+          const priceCol = row.slice(c).findIndex(v => { const s = norm(v).toLowerCase(); return s.includes('precio') || s === 'usd' || s === 'u$s' || s === '$'; });
+          return {
+            codeCol:  c,
+            descCol:  descCol >= 0 ? c + 1 + descCol : c + 1,
+            priceCol: priceCol >= 0 ? c + priceCol : c + 5,
+            unitCol:  c + 6,
+            packCol:  c + 7,
+          };
+        }
+      }
+    }
+    // Fallback a estructura Vulcano estándar (col[1]=código, col[2]=desc, col[6]=precio)
+    return { codeCol: 1, descCol: 2, priceCol: 6, unitCol: 7, packCol: 8 };
+  };
+
   let idx = 0;
   for (const { name: sheetName, rows } of sheets) {
-    if (!rows || rows.length < 5) continue;
+    if (!rows || rows.length < 3) continue;
+    const { codeCol, descCol, priceCol, unitCol, packCol } = detectColumns(rows);
     let cat = '';
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] as unknown[];
-      if (!row || row.length < 3) continue;
-      const col1 = row[1]; const col2 = norm(row[2]);
-      if (isNumId(col1) && col2) {
-        const code = String(col1).trim();
-        const pUSD = toNum(row[6]);
+      if (!row || row.length < descCol + 1) continue;
+      const col1 = row[codeCol];
+      const col2 = norm(row[descCol]);
+      if (isProductCode(col1) && col2) {
+        const code  = norm(col1);
+        const pUSD  = toNum(row[priceCol]);
         const match = byCode.get(code.toLowerCase()) ?? byName.get(col2.toLowerCase());
-        items.push({ id: `cat_${idx++}`, sheet: sheetName, category: cat, code, desc: col2,
-          priceUSD: pUSD || null, priceARS: null,
-          unit: norm(row[7]) || 'U', pack: toNum(row[8]) || 1, isNew: norm(row[5]).toLowerCase().includes('nuevo'),
+        items.push({
+          id: `cat_${idx++}`, sheet: sheetName, category: cat,
+          code, desc: col2, priceUSD: pUSD || null, priceARS: null,
+          unit: norm(row[unitCol]) || 'U', pack: toNum(row[packCol]) || 1,
+          isNew: norm(row[codeCol - 1] ?? '').toLowerCase().includes('nuevo') || norm(row[codeCol + 4] ?? '').toLowerCase().includes('nuevo'),
           notes: '', source: 'excel',
-          inAcqua: !!match, acquaId: match?.id, acquaName: match?.name, acquaCost: match?.cost, acquaPrice: match?.price });
+          inAcqua: !!match, acquaId: match?.id, acquaName: match?.name, acquaCost: match?.cost, acquaPrice: match?.price,
+        });
       } else {
-        const c1s = norm(col1).toLowerCase();
-        if (!c1s || c1s === 'código' || c1s === ' ' || c1s.length > 50) continue;
-        cat = norm(col1);
+        const c1s = norm(col1);
+        // Es categoría: texto, no muy largo, no es encabezado de columna
+        if (!c1s || c1s.length > 60) continue;
+        const lower = c1s.toLowerCase();
+        if (['código','codigo','descripción','descripcion','precio','usd','u$s','cantidad','unidad','pack'].includes(lower)) continue;
+        cat = c1s;
       }
     }
   }
   return items;
 }
 
-function mergeAIItems(aiItems: Array<{ code: string; desc: string; priceUSD: number | null; priceARS: number | null; unit: string; category: string; notes: string }>): CatalogItem[] {
-  const byCode = new Map<string, { id: string; name: string; cost: number; price: number }>();
-  const byName = new Map<string, { id: string; name: string; cost: number; price: number }>();
-  (productsData as Array<{ id: string; supplierCode: string | null; name: string; cost: number; price: number }>).forEach(p => {
-    if (p.supplierCode) byCode.set(p.supplierCode.trim().toLowerCase(), { id: p.id, name: p.name, cost: p.cost, price: p.price });
-    byName.set(p.name.trim().toLowerCase(), { id: p.id, name: p.name, cost: p.cost, price: p.price });
-  });
+function mergeAIItems(
+  aiItems: Array<{ code: string; desc: string; priceUSD: number | null; priceARS: number | null; unit: string; category: string; notes: string }>,
+  supplierProductCodes?: string[],
+): CatalogItem[] {
+  const { byCode, byName } = buildMatchMaps(supplierProductCodes);
   return aiItems.map((ai, i) => {
     const match = byCode.get(ai.code.trim().toLowerCase()) ?? byName.get(ai.desc.trim().toLowerCase());
-    return { id: `ai_${i}`, sheet: 'IA', category: ai.category, code: ai.code, desc: ai.desc,
+    return {
+      id: `ai_${i}`, sheet: 'IA', category: ai.category, code: ai.code, desc: ai.desc,
       priceUSD: ai.priceUSD, priceARS: ai.priceARS,
       unit: ai.unit || 'U', pack: 1, isNew: false, notes: ai.notes, source: 'ai' as const,
-      inAcqua: !!match, acquaId: match?.id, acquaName: match?.name, acquaCost: match?.cost, acquaPrice: match?.price };
+      inAcqua: !!match, acquaId: match?.id, acquaName: match?.name, acquaCost: match?.cost, acquaPrice: match?.price,
+    };
   });
 }
 
@@ -1234,8 +1297,8 @@ function guessType(f: File): 'excel' | 'image' | 'pdf' | '' {
   return '';
 }
 
-function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
-  onClose: () => void; supplierName: string; geminiKey?: string;
+function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProductCodes }: {
+  onClose: () => void; supplierName: string; geminiKey?: string; supplierProductCodes?: string[];
 }) {
   type Phase = 'idle' | 'reading' | 'ai_processing' | 'review' | 'ready';
 
@@ -1291,6 +1354,13 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
     } finally { setSavingCat(false); }
   };
 
+  const deleteCatalog = async () => {
+    if (!confirm(`¿Borrar el catálogo guardado de ${supplierName}? No se puede deshacer.`)) return;
+    await fetch(`/api/supplier-catalog?slug=${encodeURIComponent(supplierSlug)}`, { method: 'DELETE' });
+    setSavedAt(null);
+    setPhase('idle'); setItems([]); setQtys({}); setFileName(''); setFileType(''); setError(''); setAiSummary('');
+  };
+
   const sheetNames = useMemo(() => ['todas', ...Array.from(new Set(items.map(i => i.sheet)))], [items]);
 
   const filtered = useMemo(() => items.filter(item => {
@@ -1327,7 +1397,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
           name,
           rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: '', blankrows: false }),
         }));
-        setItems(parseCatalogSheets(sheets));
+        setItems(parseCatalogSheets(sheets, supplierProductCodes));
         setCurrency('USD');
         setPhase('ready');
       } catch (e) { setError('Error leyendo el Excel: ' + String(e)); setPhase('idle'); }
@@ -1354,7 +1424,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
         setAiSummary(data.rawSummary ?? '');
         setCurrency(data.currency ?? 'unknown');
         if (data.currency === 'ARS') setUsdRate(0);
-        setItems(mergeAIItems(data.items));
+        setItems(mergeAIItems(data.items, supplierProductCodes));
         setPhase('review');
       } catch (e) { setError(String(e)); setPhase('idle'); }
     }
@@ -1421,19 +1491,29 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
               </>
             )}
             {(phase === 'ready' || phase === 'review') && items.length > 0 && (
-              <button
-                onClick={saveCatalog}
-                disabled={savingCat}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors',
-                  saveOk
-                    ? 'bg-success/10 text-success border border-success/20'
-                    : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100',
-                  savingCat && 'opacity-50',
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={saveCatalog}
+                  disabled={savingCat}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors',
+                    saveOk ? 'bg-success/10 text-success border border-success/20'
+                           : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100',
+                    savingCat && 'opacity-50',
+                  )}
+                >
+                  {saveOk ? '✓ Guardado' : savingCat ? '…' : '💾 Guardar'}
+                </button>
+                {savedAt && (
+                  <button
+                    onClick={deleteCatalog}
+                    title="Borrar catálogo guardado"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-red-500 border border-red-200 hover:bg-red-50 transition-colors"
+                  >
+                    🗑️ Borrar
+                  </button>
                 )}
-              >
-                {saveOk ? '✓ Guardado' : savingCat ? '…' : '💾 Guardar catálogo'}
-              </button>
+              </div>
             )}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
               <X className="w-4 h-4" />
@@ -1446,6 +1526,11 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
           {/* IDLE */}
           {phase === 'idle' && (
             <div className="flex-1 flex flex-col items-center justify-center p-8 gap-5">
+              <div className="w-full max-w-lg bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-[12px] text-blue-700 leading-relaxed">
+                <p className="font-semibold mb-1">📋 ¿Para qué sirve el catálogo?</p>
+                <p>Es la <strong>lista de precios del proveedor</strong> — todos los productos que vende, con sus precios. Cargala una vez y queda guardada. Cuando llegue una lista nueva, usá <em>"Actualizar lista"</em> para reemplazarla.</p>
+                <p className="mt-1">Los productos que ya tenés en Odoo aparecen marcados como <strong>✓ En Acqua</strong>, con tu costo actual para comparar.</p>
+              </div>
               {error && (
                 <div className="w-full max-w-lg bg-danger/5 border border-danger/20 rounded-xl p-3 text-[12px] text-danger flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><span>{error}</span>
@@ -1561,8 +1646,8 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
                   className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white text-[12px] font-semibold rounded-lg hover:bg-purple-700 transition-colors">
                   <FileDown className="w-3.5 h-3.5" /> Exportar CSV
                 </button>
-                <button onClick={reset} className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-500 text-[11px] rounded-lg hover:bg-gray-50">
-                  <RefreshCw className="w-3 h-3" /> Nueva lista
+                <button onClick={reset} className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 text-gray-500 text-[11px] rounded-lg hover:bg-gray-50" title="Cargar una lista de precios más nueva del proveedor — reemplaza la actual">
+                  <RefreshCw className="w-3 h-3" /> Actualizar lista
                 </button>
               </div>
 
@@ -2029,6 +2114,7 @@ export default function SupplierDetailPage() {
           onClose={() => setShowCatalog(false)}
           supplierName={supplier.name}
           geminiKey={geminiKey}
+          supplierProductCodes={odooSupplier?.products.map(p => p.code).filter(Boolean) as string[] | undefined}
         />
       )}
 

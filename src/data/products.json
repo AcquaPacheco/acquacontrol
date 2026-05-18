@@ -12657,7 +12657,8 @@
     "supplierCode": "RESMAA4AUTOR75",
     "category": "All",
     "status": "revisar",
-    "odooId": 10969
+    "odooId": 10969,
+    "active": false
   },
   {
     "id": "__export__.product_template_3422_56eda8cb",
@@ -13752,7 +13753,8 @@
     "supplierCode": "STCN",
     "category": "Papelera",
     "status": "revisar",
-    "odooId": 12859
+    "odooId": 12859,
+    "active": false
   },
   {
     "id": "__export__.product_template_12869_bcdf32b1",

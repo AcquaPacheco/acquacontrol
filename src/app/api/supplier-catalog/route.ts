@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { resolve, dirname } from 'path';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,4 +83,17 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }
+}
+
+/**
+ * DELETE /api/supplier-catalog?slug=<supplierSlug>
+ */
+export async function DELETE(req: NextRequest) {
+  const slug = req.nextUrl.searchParams.get('slug') || '';
+  if (!slug) return NextResponse.json({ ok: false, error: 'Falta slug' }, { status: 400 });
+  const path = safePath(slug);
+  if (existsSync(path)) {
+    try { unlinkSync(path); } catch { /* ignore */ }
+  }
+  return NextResponse.json({ ok: true });
 }
