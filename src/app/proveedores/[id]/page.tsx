@@ -50,7 +50,7 @@ import {
   ArrowLeft, Upload, Download, Edit2, Phone, Mail, Building2,
   DollarSign, Package, CheckCircle2, Search,
   Info, RefreshCw, Sparkles, X,
-  Eye, FileSpreadsheet, Calendar, TrendingUp, Copy, Save,
+  Eye, EyeOff, FileSpreadsheet, Calendar, TrendingUp, Copy, Save,
   LayoutGrid, List, ShoppingCart, Minus, Plus, FileDown,
   Image as ImageIcon, Tag, AlertTriangle,
 } from 'lucide-react';
@@ -1994,6 +1994,47 @@ export default function SupplierDetailPage() {
   const [showPedidoSummary, setShowPedidoSummary] = useState(false);
   const [pedidoView, setPedidoView] = useState<'tabla' | 'grid'>('tabla');
 
+  // ── Multi-selección + ocultar productos ──────────────────────────────────
+  const HIDDEN_KEY = `acqua_hidden_${id}`;
+  const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set());
+  const [hiddenIds,    setHiddenIds]    = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? '[]') as string[]); }
+    catch { return new Set(); }
+  });
+  const [showHidden,   setShowHidden]   = useState(false);
+
+  const saveHidden = (next: Set<string>) => {
+    setHiddenIds(next);
+    localStorage.setItem(HIDDEN_KEY, JSON.stringify([...next]));
+  };
+  const hideSelected = () => {
+    const next = new Set(hiddenIds);
+    selectedIds.forEach(id => next.add(id));
+    saveHidden(next);
+    setSelectedIds(new Set());
+  };
+  const unhideSelected = () => {
+    const next = new Set(hiddenIds);
+    selectedIds.forEach(id => next.delete(id));
+    saveHidden(next);
+    setSelectedIds(new Set());
+  };
+  const clearAllHidden = () => { saveHidden(new Set()); setShowHidden(false); };
+  const toggleSelect = (siId: string) =>
+    setSelectedIds(prev => { const n = new Set(prev); n.has(siId) ? n.delete(siId) : n.add(siId); return n; });
+
+  // ── Activar/desactivar proveedor ─────────────────────────────────────────
+  const SUPPLIER_ACTIVE_KEY = `acqua_supplier_active_${id}`;
+  const [supplierActive, setSupplierActive] = useState<boolean>(() => {
+    try { return JSON.parse(localStorage.getItem(SUPPLIER_ACTIVE_KEY) ?? 'true') as boolean; }
+    catch { return true; }
+  });
+  const toggleSupplierActive = () => {
+    const next = !supplierActive;
+    setSupplierActive(next);
+    localStorage.setItem(SUPPLIER_ACTIVE_KEY, JSON.stringify(next));
+  };
+
   const products: ProductRow[] = useMemo(() => {
     if (!odooSupplier) return [];
     // Build lookup map: supplierCode → product for real status detection
@@ -2018,6 +2059,9 @@ export default function SupplierDetailPage() {
 
   const filtered = useMemo(() => {
     return products.filter(p => {
+      const isHidden = hiddenIds.has(p.si_id);
+      if (!showHidden && isHidden) return false;   // ocultos: solo aparecen si el toggle está activo
+      if (showHidden && !isHidden) return false;   // modo "ocultos": solo muestra los ocultos
       const matchStatus = statusFilter === 'todos' || p.productStatus === statusFilter;
       const matchSearch = !search
         || p.tmpl_name.toLowerCase().includes(search.toLowerCase())
@@ -2026,7 +2070,7 @@ export default function SupplierDetailPage() {
         || p.si_id.includes(search);
       return matchStatus && matchSearch;
     });
-  }, [products, statusFilter, search]);
+  }, [products, statusFilter, search, hiddenIds, showHidden]);
 
   const productStats = useMemo(() => ({
     total: products.length,
@@ -2118,6 +2162,37 @@ export default function SupplierDetailPage() {
         />
       )}
 
+      {/* ── Barra de acción masiva flotante ── */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-gray-900 text-white px-4 py-3 rounded-2xl shadow-2xl border border-white/10 animate-in slide-in-from-bottom-2">
+          <span className="text-[13px] font-semibold mr-1">
+            {selectedIds.size} {selectedIds.size === 1 ? 'producto' : 'productos'} seleccionado{selectedIds.size !== 1 ? 's' : ''}
+          </span>
+          <div className="w-px h-5 bg-white/20" />
+          {showHidden ? (
+            <button
+              onClick={unhideSelected}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-success/20 hover:bg-success/30 text-success rounded-xl text-[12px] font-semibold transition-colors"
+            >
+              👁 Mostrar de nuevo
+            </button>
+          ) : (
+            <button
+              onClick={hideSelected}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-[12px] font-semibold transition-colors"
+            >
+              🙈 Ocultar
+            </button>
+          )}
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Breadcrumb */}
       <div className="bg-header border-b border-white/10 px-5 lg:px-8 xl:px-12 py-3">
         <div className="max-w-[1680px] mx-auto flex items-center gap-2 text-[12px]">
@@ -2179,12 +2254,24 @@ export default function SupplierDetailPage() {
               {/* Cover */}
               <div className={cn('relative h-16 bg-gradient-to-br', supplier.headerColor || 'from-zinc-700 to-zinc-900')}>
                 {!editMode ? (
-                  <button
-                    onClick={startEdit}
-                    className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 bg-black/30 hover:bg-black/50 rounded-md text-white/90 text-[11px] font-medium transition-colors"
-                  >
-                    <Edit2 className="w-3 h-3" /> Editar
-                  </button>
+                  <div className="absolute top-2 right-2 flex items-center gap-1">
+                    <button
+                      onClick={toggleSupplierActive}
+                      title={supplierActive ? 'Desactivar proveedor' : 'Activar proveedor'}
+                      className={cn(
+                        'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        supplierActive ? 'bg-black/30 hover:bg-red-500/60 text-white/90' : 'bg-success/60 hover:bg-success/80 text-white',
+                      )}
+                    >
+                      {supplierActive ? <><EyeOff className="w-3 h-3" /> Desactivar</> : <><Eye className="w-3 h-3" /> Activar</>}
+                    </button>
+                    <button
+                      onClick={startEdit}
+                      className="flex items-center gap-1 px-2 py-1 bg-black/30 hover:bg-black/50 rounded-md text-white/90 text-[11px] font-medium transition-colors"
+                    >
+                      <Edit2 className="w-3 h-3" /> Editar
+                    </button>
+                  </div>
                 ) : (
                   <div className="absolute top-2 right-2 flex items-center gap-1">
                     <button onClick={saveEdit} className="flex items-center gap-1 px-2 py-1 bg-success hover:bg-success/90 rounded-md text-white text-[11px] font-semibold">
@@ -2196,7 +2283,12 @@ export default function SupplierDetailPage() {
                   </div>
                 )}
                 {!editMode && (
-                  <div className="absolute bottom-1.5 left-14">
+                  <div className="absolute bottom-1.5 left-14 flex items-center gap-1">
+                    {!supplierActive && (
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/80 text-white">
+                        <EyeOff className="w-2.5 h-2.5" /> Inactivo
+                      </span>
+                    )}
                     <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold', st.color)}>
                       <span className={cn('w-1.5 h-1.5 rounded-full', st.dot)} />
                       {st.label}
@@ -2470,10 +2562,10 @@ export default function SupplierDetailPage() {
                 ] as const).map(tab => (
                   <button
                     key={tab.key}
-                    onClick={() => setStatusFilter(tab.key as 'todos' | ProductStatus)}
+                    onClick={() => { setStatusFilter(tab.key as 'todos' | ProductStatus); setShowHidden(false); }}
                     className={cn(
                       'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold transition-colors',
-                      statusFilter === tab.key
+                      !showHidden && statusFilter === tab.key
                         ? tab.key === 'todos' ? 'bg-gray-900 text-white'
                           : tab.key === 'en_sistema' ? 'bg-success/15 text-success'
                           : tab.key === 'sin_costo' ? 'bg-warning/15 text-warning'
@@ -2486,6 +2578,18 @@ export default function SupplierDetailPage() {
                     <span className="text-[10px] font-bold opacity-70">{tab.count}</span>
                   </button>
                 ))}
+                {/* Ocultos toggle */}
+                {hiddenIds.size > 0 && (
+                  <button
+                    onClick={() => setShowHidden(v => !v)}
+                    className={cn(
+                      'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold transition-colors',
+                      showHidden ? 'bg-gray-600 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200',
+                    )}
+                  >
+                    👁 Ocultos <span className="text-[10px] font-bold opacity-70">{hiddenIds.size}</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2510,7 +2614,13 @@ export default function SupplierDetailPage() {
                   <table className="w-full">
                     <thead>
                       <tr className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider bg-gray-50/80 border-b border-gray-100">
-                        <th className="text-left px-3 py-2.5 w-8">#</th>
+                        <th className="px-3 py-2.5 w-8">
+                          <input type="checkbox"
+                            checked={filtered.length > 0 && filtered.every(p => selectedIds.has(p.si_id))}
+                            onChange={e => setSelectedIds(e.target.checked ? new Set(filtered.map(p => p.si_id)) : new Set())}
+                            className="w-3.5 h-3.5 rounded accent-acqua cursor-pointer" />
+                        </th>
+                        <th className="text-left px-3 py-2.5 w-8 text-gray-400">#</th>
                         <th className="text-left px-3 py-2.5">Producto (Odoo)</th>
                         <th className="text-left px-3 py-2.5 hidden xl:table-cell">Nombre proveedor</th>
                         <th className="text-center px-2 py-2.5">Código</th>
@@ -2530,7 +2640,17 @@ export default function SupplierDetailPage() {
                         const currentNet = currentPrice * (1 - p.discount / 100);
 
                         return (
-                          <tr key={p.si_id} className={cn('group hover:bg-gray-50/50 transition-colors', p.productStatus === 'no_figura' && 'opacity-50')}>
+                          <tr key={p.si_id} className={cn(
+                            'group hover:bg-gray-50/50 transition-colors',
+                            p.productStatus === 'no_figura' && 'opacity-50',
+                            selectedIds.has(p.si_id) && 'bg-acqua/5',
+                          )}>
+                            <td className="px-3 py-2 w-8">
+                              <input type="checkbox"
+                                checked={selectedIds.has(p.si_id)}
+                                onChange={() => toggleSelect(p.si_id)}
+                                className="w-3.5 h-3.5 rounded accent-acqua cursor-pointer" />
+                            </td>
                             <td className="px-3 py-2 text-[11px] text-gray-400 font-mono">{i + 1}</td>
                             <td className="px-3 py-2">
                               <div className="flex items-start gap-1.5">
