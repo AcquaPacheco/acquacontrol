@@ -1865,12 +1865,13 @@ export default function SupplierDetailPage() {
 
     return odooSupplier.products.map((p) => {
       const match = productByCode.get((p.code || '').trim().toLowerCase());
-      const productStatus: ProductStatus = p.price === 0
+      // sin_costo = el proveedor no tiene precio puesto (price === 0 o null)
+      // en_sistema = está vinculado en Odoo (aunque el costo interno sea 0)
+      // no_figura  = no hay match en products.json
+      const productStatus: ProductStatus = (!p.price || p.price === 0)
         ? 'sin_costo'
         : !match
         ? 'no_figura'
-        : match.cost === 0
-        ? 'sin_costo'
         : 'en_sistema';
       return { ...p, productStatus };
     });
