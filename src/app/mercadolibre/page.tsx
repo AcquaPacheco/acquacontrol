@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import productsData from '@/data/products.json';
 import { cn } from '@/lib/utils';
 import { useMLLabStore } from '@/lib/use-ml-lab-store';
+import { loadGeminiKey, saveGeminiKey, clearGeminiKey } from '@/lib/gemini-key';
 import {
   parseOdooRows, parseMLRows, matchAndBuild, calcProfitability,
   calcIdealPrice, generateScenarios, generateConsultantReport, generateAlerts,
@@ -1019,11 +1020,12 @@ interface ScoutItem { id: string; title: string; price: number; condition: strin
 interface ScoutMarket { avgPrice: number; minPrice: number; maxPrice: number; medPrice: number; freeShipPct: number; installmentsPct: number }
 
 function ProductFicha({
-  product, store, onClose,
+  product, store, onClose, geminiKey = '',
 }: {
   product: MLLabProduct;
   store: ReturnType<typeof useMLLabStore>;
   onClose: () => void;
+  geminiKey?: string;
 }) {
   const [fichaTab,  setFichaTab]  = useState<FichaTab>('rentabilidad');
   const [showParams, setShowParams] = useState(false);
@@ -1099,7 +1101,7 @@ function ProductFicha({
     try {
       const res = await fetch('/api/ml-description', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(geminiKey ? { 'X-Gemini-Key': geminiKey } : {}) },
         body: JSON.stringify({
           productName: product.name,
           sku: product.sku,
@@ -1182,7 +1184,7 @@ function ProductFicha({
     try {
       const res = await fetch('/api/ml-consult', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(geminiKey ? { 'X-Gemini-Key': geminiKey } : {}) },
         body: JSON.stringify({
           messages: nextMessages,
           product: {
@@ -1888,6 +1890,16 @@ export default function MLLabPage() {
   const [activeTab,    setActiveTab]    = useState<MainTab>('dashboard');
   const [selectedId,   setSelectedId]   = useState<string | null>(null);
   const [showParamsPanel, setShowParamsPanel] = useState(false);
+  const [geminiKey,    setGeminiKey]    = useState('');
+  const [geminiInput,  setGeminiInput]  = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+
+  // Load Gemini key from localStorage on mount
+  useEffect(() => {
+    const k = loadGeminiKey();
+    setGeminiKey(k);
+    setGeminiInput(k);
+  }, []);
 
   const selectedProduct = useMemo(
     () => store.products.find(p => p.id === selectedId) ?? null,
@@ -1973,9 +1985,54 @@ export default function MLLabPage() {
       {/* Global params slide-down */}
       {showParamsPanel && (
         <div className="bg-white border-b border-gray-200 shadow-sm shrink-0">
-          <div className="max-w-[1920px] mx-auto px-5 lg:px-8 py-4">
+          <div className="max-w-[1920px] mx-auto px-5 lg:px-8 py-4 space-y-4">
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-2 max-w-4xl">
               <GlobalParamsPanel params={store.globalParams} onChange={store.setGlobalParams} />
+            </div>
+
+            {/* ─── Clave IA Gemini ─── */}
+            <div className="border-t border-gray-100 pt-4 max-w-lg">
+              <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-2">Clave IA (Consultor y Descripciones)</p>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={showGeminiKey ? 'text' : 'password'}
+                    value={geminiInput}
+                    onChange={e => setGeminiInput(e.target.value)}
+                    placeholder="AIza... (gratis en aistudio.google.com)"
+                    className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-[#FFE600]/40 pr-8"
+                  />
+                  <button
+                    onClick={() => setShowGeminiKey(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-[10px]"
+                  >
+                    {showGeminiKey ? '🙈' : '👁'}
+                  </button>
+                </div>
+                <button
+                  onClick={() => {
+                    if (geminiInput.trim()) {
+                      saveGeminiKey(geminiInput.trim());
+                      setGeminiKey(geminiInput.trim());
+                    } else {
+                      clearGeminiKey();
+                      setGeminiKey('');
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-[#FFE600] text-[#07111F] rounded-lg text-[11px] font-bold hover:bg-[#FFC400] transition-colors whitespace-nowrap"
+                >
+                  Guardar
+                </button>
+                {geminiKey && (
+                  <span className="text-[10px] text-green-600 font-semibold whitespace-nowrap">✓ Activa</span>
+                )}
+              </div>
+              {!geminiKey && (
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Sin clave, el Consultor y las descripciones IA no funcionan. Gratis en{' '}
+                  <a href="https://aistudio.google.com" target="_blank" rel="noreferrer" className="underline text-[#3483FA]">aistudio.google.com</a>
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -2043,6 +2100,7 @@ export default function MLLabPage() {
               product={selectedProduct}
               store={store}
               onClose={() => setSelectedId(null)}
+              geminiKey={geminiKey}
             />
           </div>
         </div>

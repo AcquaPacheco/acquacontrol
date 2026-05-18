@@ -98,10 +98,10 @@ interface RequestBody {
 // Route handler
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || req.headers.get('X-Gemini-Key') || '';
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'GEMINI_API_KEY no configurada. Conseguila gratis en aistudio.google.com y agregala en Vercel → Settings → Environment Variables.' },
+      { error: 'Configurá tu clave de IA Gemini en ML Lab → Parámetros globales → Clave IA.' },
       { status: 500 },
     );
   }
