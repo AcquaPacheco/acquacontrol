@@ -1,1 +1,538 @@
-[]
+[
+  {
+    "id": "__export__.res_partner_838_c94aefaf",
+    "name": "D AGNILLO MARIANA GABRIELA",
+    "slug": "d-agnillo-mariana-gabriela",
+    "phone": "+54 9 11 6201-2960",
+    "tags": [
+      "Jabón Líquido",
+      "Proveedor",
+      "Suavizantes",
+      "Sulfato de Cobre",
+      "Ácido"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 838
+  },
+  {
+    "id": "__export__.res_partner_854_29f14803",
+    "name": "OPPIZZI SERGIO",
+    "slug": "oppizzi-sergio",
+    "phone": "+54 9 11 2457-4387",
+    "tags": [
+      "Cloro",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 854
+  },
+  {
+    "id": "__export__.res_partner_877_6363ea70",
+    "name": "LAMBDA CHEMICAL S.A.",
+    "slug": "lambda-chemical-sa",
+    "phone": "+54 9 11 4716-1327",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 877
+  },
+  {
+    "id": "__export__.res_partner_1219_755e8a3a",
+    "name": "PLASTICOS SANTA MARIA SOCIEDAD ANONIMA",
+    "slug": "plasticos-santa-maria-sociedad-anonima",
+    "phone": "+54 9 11 5108-3838",
+    "tags": [
+      "Envases Plásticos"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1219
+  },
+  {
+    "id": "__export__.res_partner_826_b98f00ae",
+    "name": "ALBERTO JOSÉ PAZO",
+    "slug": "alberto-jose-pazo",
+    "phone": "+54 9 11 3198-9836",
+    "tags": [
+      "Proveedor",
+      "Veneno"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 826
+  },
+  {
+    "id": "__export__.res_partner_1235_bb905d43",
+    "name": "MANDEL FY S.R.L.",
+    "slug": "mandel-fy-srl",
+    "phone": "+54 9 11 3019-2025",
+    "tags": [
+      "Carbon & Leña",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1235
+  },
+  {
+    "id": "__export__.res_partner_849_7fcebf2b",
+    "name": "MATIAS JAVIER GUINZBURG",
+    "slug": "matias-javier-guinzburg",
+    "phone": "+54 9 348 458-4363",
+    "tags": [
+      "Art. de limpieza",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 849
+  },
+  {
+    "id": "__export__.res_partner_867_71fedfa5",
+    "name": "VULCANO S.A.",
+    "slug": "vulcano-sa",
+    "phone": "+54 9 236 430-1700",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 867
+  },
+  {
+    "id": "__export__.res_partner_831_3f7dbaa2",
+    "name": "BREAKING LAB S.R.L.",
+    "slug": "breaking-lab-srl",
+    "phone": "+54 9 11 2613-4267",
+    "tags": [
+      "Bicarbonato/Vinagre",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 831
+  },
+  {
+    "id": "__export__.res_partner_1188_74cadef8",
+    "name": "OTERO JOHANA VANINA",
+    "slug": "otero-johana-vanina",
+    "phone": "+54 9 11 6290-4131",
+    "tags": [
+      "Jabón Líquido",
+      "Pastas",
+      "Suavizantes"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1188
+  },
+  {
+    "id": "__export__.res_partner_1243_2146ac14",
+    "name": "QDN ARGENTINA 2017 S.A.",
+    "slug": "qdn-argentina-2017-sa",
+    "phone": "+54 9 11 6119-6640",
+    "tags": [
+      "Cloro",
+      "Proveedor",
+      "Ácido"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1243
+  },
+  {
+    "id": "__export__.res_partner_835_85be6593",
+    "name": "CLOROCO BEST CLEAN S.R.L.",
+    "slug": "cloroco-best-clean-srl",
+    "phone": "+54 9 11 3151-4012",
+    "tags": [
+      "Cloro",
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 835
+  },
+  {
+    "id": "__export__.res_partner_872_e7faa408",
+    "name": "DISTRIBUIDORA POLI-R",
+    "slug": "distribuidora-poli-r",
+    "phone": "+54 9 11 7115-5550",
+    "tags": [
+      "Ferretería",
+      "Proveedor"
+    ],
+    "fiscalCondition": null,
+    "odooId": 872
+  },
+  {
+    "id": "__export__.res_partner_1044_c5efea9a",
+    "name": "LEONARDO TASSITANI",
+    "slug": "leonardo-tassitani",
+    "phone": "+54 9 11 3356-4987",
+    "tags": [
+      "Mayorista",
+      "Proveedor"
+    ],
+    "fiscalCondition": "Consumidor Final",
+    "odooId": 1044
+  },
+  {
+    "id": "__export__.res_partner_863_cbc91427",
+    "name": "SOLVI S.R.L.",
+    "slug": "solvi-srl",
+    "phone": "+54 9 11 2319-4420",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 863
+  },
+  {
+    "id": "__export__.res_partner_825_b4d616eb",
+    "name": "AGUAS S.R.L.",
+    "slug": "aguas-srl",
+    "phone": "+54 9 11 3118-3704",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 825
+  },
+  {
+    "id": "__export__.res_partner_873_97915d95",
+    "name": "MAKINTHAL QUIMICA S.R.L.",
+    "slug": "makinthal-quimica-srl",
+    "phone": "+54 9 11 2892-5149",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 873
+  },
+  {
+    "id": "__export__.res_partner_851_8df0acd9",
+    "name": "METROCLOR S.R.L.",
+    "slug": "metroclor-srl",
+    "phone": null,
+    "tags": [
+      "Proveedor"
+    ],
+    "fiscalCondition": null,
+    "odooId": 851
+  },
+  {
+    "id": "__export__.res_partner_1357_455477c9",
+    "name": "SZMULEWICZ MAXIMILIANO",
+    "slug": "szmulewicz-maximiliano",
+    "phone": "+54 9 11 5028-2633",
+    "tags": [
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1357
+  },
+  {
+    "id": "__export__.res_partner_1192_2b6dc0cc",
+    "name": "AGROPECUARIA DOBLE L S.R.L.",
+    "slug": "agropecuaria-doble-l-srl",
+    "phone": "+54 11 5476-4471",
+    "tags": [
+      "Doypack",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1192
+  },
+  {
+    "id": "__export__.res_partner_860_a57d43c1",
+    "name": "SEIQ GROUP S.A.",
+    "slug": "seiq-group-sa",
+    "phone": "+54 9 11 6203-1800",
+    "tags": [
+      "Productos de Limpieza",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 860
+  },
+  {
+    "id": "__export__.res_partner_1047_19cfa355",
+    "name": "CLORISTAL",
+    "slug": "cloristal",
+    "phone": "+54 9 11 6739-0126",
+    "tags": [
+      "Cloro",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1047
+  },
+  {
+    "id": "__export__.res_partner_1206_5db18a1a",
+    "name": "EMPRESA DISTRIBUIDORA Y COMERCIALIZADORA NORTE S.A.",
+    "slug": "empresa-distribuidora-y-comercializadora-norte-sa",
+    "phone": null,
+    "tags": [
+      "Edenor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1206
+  },
+  {
+    "id": "__export__.res_partner_843_d9a2953b",
+    "name": "J.J. MENDIZABAL S.A.",
+    "slug": "jj-mendizabal-sa",
+    "phone": "+54 9 11 2479-2379",
+    "tags": [
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 843
+  },
+  {
+    "id": "__export__.res_partner_846_8ca983e8",
+    "name": "LIMPIEZAK2 S.R.L.",
+    "slug": "limpiezak2-srl",
+    "phone": "+54 9 11 2849-5581",
+    "tags": [
+      "Art. de limpieza",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 846
+  },
+  {
+    "id": "__export__.res_partner_850_94808104",
+    "name": "MAYCAR SOCIEDAD ANONIMA",
+    "slug": "maycar-sociedad-anonima",
+    "phone": null,
+    "tags": [
+      "Productos de Limpieza",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 850
+  },
+  {
+    "id": "__export__.res_partner_1336_67e99cf6",
+    "name": "Natalia Calvo - C&S Administración",
+    "slug": "natalia-calvo---cs-administracion",
+    "phone": "+54 11 5976-3830",
+    "tags": [
+      "Expensas"
+    ],
+    "fiscalCondition": "Consumidor Final",
+    "odooId": 1336
+  },
+  {
+    "id": "__export__.res_partner_827_05ff0198",
+    "name": "AQUAFLEX ARGENTINA S.R.L.",
+    "slug": "aquaflex-argentina-srl",
+    "phone": "+54 9 11 6121-7821",
+    "tags": [
+      "Proveedor",
+      "Riego"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 827
+  },
+  {
+    "id": "__export__.res_partner_1753_6cd6ac06",
+    "name": "CAFFARO HNOS. S.R.L.",
+    "slug": "caffaro-hnos-srl",
+    "phone": "+54 9 11 5814-6087",
+    "tags": [
+      "Pileta",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1753
+  },
+  {
+    "id": "__export__.res_partner_1335_5f7cee50",
+    "name": "Cicchini Marcelo Mauro",
+    "slug": "cicchini-marcelo-mauro",
+    "phone": null,
+    "tags": [],
+    "fiscalCondition": "Responsable Monotributo",
+    "odooId": 1335
+  },
+  {
+    "id": "__export__.res_partner_2120_c72b1b94",
+    "name": "JUAN IGNACIO CASELLA",
+    "slug": "juan-ignacio-casella",
+    "phone": "+54 11 4440-5254",
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 2120
+  },
+  {
+    "id": "__export__.res_partner_1951_1d017bff",
+    "name": "BRILLONOR S.R.L.",
+    "slug": "brillonor-srl",
+    "phone": "+54 9 11 3636-2567",
+    "tags": [
+      "Bath and body",
+      "Chemicals including Bio Chemicals and Gas Materials",
+      "Institutional food services equipment"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1951
+  },
+  {
+    "id": "__export__.res_partner_832_7a46a6de",
+    "name": "CARRUPI S.A.",
+    "slug": "carrupi-sa",
+    "phone": "+54 9 11 6891-5888",
+    "tags": [
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 832
+  },
+  {
+    "id": "__export__.res_partner_1185_7973fffe",
+    "name": "CONCA CARLET GABRIEL FERNANDO",
+    "slug": "conca-carlet-gabriel-fernando",
+    "phone": null,
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1185
+  },
+  {
+    "id": "__export__.res_partner_836_7abbec9f",
+    "name": "Consorcio Dehesa",
+    "slug": "consorcio-dehesa",
+    "phone": null,
+    "tags": [
+      "Consorcio"
+    ],
+    "fiscalCondition": "Consumidor Final",
+    "odooId": 836
+  },
+  {
+    "id": "__export__.res_partner_848_9f88e51b",
+    "name": "MARTIN JODE PEDALINO MOYANO",
+    "slug": "martin-jode-pedalino-moyano",
+    "phone": "+54 9 11 6943-5292",
+    "tags": [
+      "Bolsas",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 848
+  },
+  {
+    "id": "__export__.res_partner_857_992d1a6b",
+    "name": "ROYCO S.A.",
+    "slug": "royco-sa",
+    "phone": "+54 9 11 4949-1773",
+    "tags": [
+      "Art. de limpieza",
+      "Proveedor"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 857
+  },
+  {
+    "id": "__export__.res_partner_1779_a96afd16",
+    "name": "SIELEGANTE S.R.L.",
+    "slug": "sielegante-srl",
+    "phone": "+54 9 11 2818-0958",
+    "tags": [
+      "Chemicals including Bio Chemicals and Gas Materials"
+    ],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1779
+  },
+  {
+    "id": "__export__.res_partner_1338_4ff293bb",
+    "name": "TELECOM ARGENTINA S.A.",
+    "slug": "telecom-argentina-sa",
+    "phone": null,
+    "tags": [
+      "Cable television services",
+      "Cellular telephone services",
+      "Local and long distance telephone communications",
+      "Telecommunications media services",
+      "Telephony equipment"
+    ],
+    "fiscalCondition": null,
+    "odooId": 1338
+  },
+  {
+    "id": "__export__.res_partner_1073_1828e2d5",
+    "name": "CLORAR",
+    "slug": "clorar",
+    "phone": null,
+    "tags": [
+      "Cloro",
+      "Clorotec",
+      "Proveedor"
+    ],
+    "fiscalCondition": null,
+    "odooId": 1073
+  },
+  {
+    "id": "__export__.res_partner_1169_4802dd52",
+    "name": "Gaston",
+    "slug": "gaston",
+    "phone": "+54 9 11 3151-4012",
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 1169
+  },
+  {
+    "id": "__export__.res_partner_2454_02fc665d",
+    "name": "KRIGER EZEQUIEL GASTON",
+    "slug": "kriger-ezequiel-gaston",
+    "phone": null,
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 2454
+  },
+  {
+    "id": "__export__.res_partner_1650_5ee50b97",
+    "name": "LACUS LATINA S.A.",
+    "slug": "lacus-latina-sa",
+    "phone": "+54 9 11 3865-1519",
+    "tags": [],
+    "fiscalCondition": null,
+    "odooId": 1650
+  },
+  {
+    "id": "__export__.res_partner_878_91ccf566",
+    "name": "Federico Sampedro",
+    "slug": "federico-sampedro",
+    "phone": "+54 9 11 4716-1327",
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 878
+  },
+  {
+    "id": "__export__.res_partner_874_0ea7501f",
+    "name": "Max",
+    "slug": "max",
+    "phone": "+54 9 11 2465-0524",
+    "tags": [],
+    "fiscalCondition": "IVA Responsable Inscripto",
+    "odooId": 874
+  },
+  {
+    "id": "__export__.res_partner_1280_629efaa8",
+    "name": "PITTA CATERING S.R.L.",
+    "slug": "pitta-catering-srl",
+    "phone": null,
+    "tags": [],
+    "fiscalCondition": null,
+    "odooId": 1280
+  },
+  {
+    "id": "__export__.res_partner_2427_5d1cc6a2",
+    "name": "solvi",
+    "slug": "solvi",
+    "phone": null,
+    "tags": [],
+    "fiscalCondition": null,
+    "odooId": 2427
+  }
+]
