@@ -3,36 +3,112 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
+const HISTORY_PATH  = resolve(process.cwd(), 'src/data/change-history.json');
 
-interface Product { id: string; active: boolean; [key: string]: unknown; }
+interface Product { id: string; active: boolean; cost: number; price: number; notes?: string; name?: string; [key: string]: unknown; }
+
+interface HistoryEntry {
+  id: string;
+  productId: string;
+  productName: string;
+  field: string;
+  oldValue: unknown;
+  newValue: unknown;
+  source: string;
+  timestamp: string;
+}
 
 function readProducts(): Product[] {
   if (!existsSync(PRODUCTS_PATH)) return [];
   return JSON.parse(readFileSync(PRODUCTS_PATH, 'utf8')) as Product[];
 }
 
+function readHistory(): HistoryEntry[] {
+  if (!existsSync(HISTORY_PATH)) return [];
+  try { return JSON.parse(readFileSync(HISTORY_PATH, 'utf8')) as HistoryEntry[]; }
+  catch { return []; }
+}
+
+function appendHistory(entry: Omit<HistoryEntry, 'id' | 'timestamp'>) {
+  const history = readHistory();
+  const newEntry: HistoryEntry = {
+    ...entry,
+    id: `h_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: new Date().toISOString(),
+  };
+  history.unshift(newEntry); // most recent first
+  // Keep last 500 entries
+  if (history.length > 500) history.splice(500);
+  writeFileSync(HISTORY_PATH, JSON.stringify(history, null, 2), 'utf8');
+  return newEntry;
+}
+
 /**
  * PATCH /api/products
- * Body: { id: string; active: boolean }
- * Actualiza el campo `active` de un producto en products.json.
+ * Body: { id: string; active?: boolean; cost?: number; price?: number; notes?: string; source?: string }
  */
 export async function PATCH(req: NextRequest) {
   try {
-    const { id, active } = await req.json() as { id: string; active: boolean };
-    if (!id || typeof active !== 'boolean') {
-      return NextResponse.json({ ok: false, error: 'Faltan parámetros id y active' }, { status: 400 });
-    }
+    const body = await req.json() as {
+      id: string;
+      active?: boolean;
+      cost?: number;
+      price?: number;
+      notes?: string;
+      source?: string;
+    };
+
+    const { id, source = 'manual' } = body;
+    if (!id) return NextResponse.json({ ok: false, error: 'Falta id' }, { status: 400 });
 
     const products = readProducts();
     const idx = products.findIndex(p => p.id === id);
-    if (idx === -1) {
-      return NextResponse.json({ ok: false, error: `Producto "${id}" no encontrado` }, { status: 404 });
+    if (idx === -1) return NextResponse.json({ ok: false, error: `Producto "${id}" no encontrado` }, { status: 404 });
+
+    const current = products[idx];
+    const updates: Partial<Product> = {};
+    const historyEntries: ReturnType<typeof appendHistory>[] = [];
+
+    if (typeof body.active === 'boolean' && body.active !== current.active) {
+      updates.active = body.active;
+    }
+    if (typeof body.cost === 'number' && body.cost !== current.cost) {
+      updates.cost = body.cost;
+      // Recalculate margin if price exists
+      if (current.price > 1 && body.cost > 0) {
+        updates.margin = Math.round(((current.price - body.cost) / current.price) * 1000) / 10;
+        updates.markup = Math.round(((current.price / body.cost) - 1) * 1000) / 10;
+      }
+    }
+    if (typeof body.price === 'number' && body.price !== current.price) {
+      updates.price = body.price;
+      const costToUse = typeof body.cost === 'number' ? body.cost : current.cost;
+      if (body.price > 1 && costToUse > 0) {
+        updates.margin = Math.round(((body.price - costToUse) / body.price) * 1000) / 10;
+        updates.markup = Math.round(((body.price / costToUse) - 1) * 1000) / 10;
+      }
+    }
+    if (typeof body.notes === 'string') {
+      updates.notes = body.notes;
     }
 
-    products[idx] = { ...products[idx], active };
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ ok: true, id, message: 'Sin cambios' });
+    }
+
+    products[idx] = { ...current, ...updates };
     writeFileSync(PRODUCTS_PATH, JSON.stringify(products, null, 2), 'utf8');
 
-    return NextResponse.json({ ok: true, id, active });
+    // Log history for cost and price changes
+    const productName = (current.name as string) || id;
+    if (updates.cost !== undefined) {
+      historyEntries.push(appendHistory({ productId: id, productName, field: 'cost', oldValue: current.cost, newValue: updates.cost, source }));
+    }
+    if (updates.price !== undefined) {
+      historyEntries.push(appendHistory({ productId: id, productName, field: 'price', oldValue: current.price, newValue: updates.price, source }));
+    }
+
+    return NextResponse.json({ ok: true, id, updates, history: historyEntries });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

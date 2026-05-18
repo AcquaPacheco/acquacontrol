@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useColumnResize } from '@/lib/use-column-resize';
 import productsData from '@/data/products.json';
 import {
@@ -330,16 +330,68 @@ function Row({ label, value, strong, mono }: {
 // PRODUCT INSPECTOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive }: {
+function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate }: {
   product: Product;
   onClose: () => void;
   odooUrl?: string;
   onToggleActive?: (id: string, active: boolean) => void;
+  onUpdate?: (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number }) => void;
 }) {
   const [showMarket,   setShowMarket]   = useState(false);
   const [showLists,    setShowLists]    = useState(true);
   const [copied,       setCopied]       = useState<string | null>(null);
   const [toggling,     setToggling]     = useState(false);
+
+  // ── Inline editing ──────────────────────────────────────────────────────
+  const [editingCost,  setEditingCost]  = useState(false);
+  const [editingPrice, setEditingPrice] = useState(false);
+  const [costInput,    setCostInput]    = useState('');
+  const [priceInput,   setPriceInput]   = useState('');
+  const [saving,       setSaving]       = useState(false);
+  const [saved,        setSaved]        = useState<string | null>(null);
+  const costInputRef  = useRef<HTMLInputElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editingCost)  costInputRef.current?.focus();  }, [editingCost]);
+  useEffect(() => { if (editingPrice) priceInputRef.current?.focus(); }, [editingPrice]);
+
+  const startEditCost = () => {
+    setCostInput(p.cost > 0 ? String(p.cost) : '');
+    setEditingCost(true);
+    setEditingPrice(false);
+  };
+  const startEditPrice = () => {
+    setPriceInput(p.price > 1 ? String(p.price) : '');
+    setEditingPrice(true);
+    setEditingCost(false);
+  };
+  const cancelEdit = () => { setEditingCost(false); setEditingPrice(false); };
+
+  const parseNum = (s: string) => parseFloat(s.replace(/\./g, '').replace(',', '.'));
+
+  const saveField = async (field: 'cost' | 'price', raw: string) => {
+    const val = parseNum(raw);
+    if (!val || isNaN(val) || val <= 0) { cancelEdit(); return; }
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { id: p.id, source: 'manual' };
+      body[field] = val;
+      const res = await fetch('/api/products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+      if (data.ok && data.updates) {
+        onUpdate?.(p.id, data.updates);
+        setSaved(field === 'cost' ? 'Costo guardado ✓' : 'Precio guardado ✓');
+        setTimeout(() => setSaved(null), 2200);
+      }
+    } finally {
+      setSaving(false);
+      cancelEdit();
+    }
+  };
+
   const imgSrc = p.image || buildOdooImageUrl(p.odooId, 'product.template', odooUrl);
 
   const handleToggleActive = async () => {
@@ -504,20 +556,57 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive }:
 
         {/* ── 3. Precio protagonista ── */}
         <div className="px-4 py-4">
-          <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase mb-3">
-            Lista A · precio exportable
-          </p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase">
+              Lista A · precio exportable
+            </p>
+            {saved && (
+              <span className="text-[10px] font-semibold text-[#16A34A] animate-pulse">{saved}</span>
+            )}
+          </div>
 
           <div className="flex items-end gap-3 mb-4">
             <div className="flex-1 min-w-0">
-              {p.price > 1 ? (
-                <div className="text-[32px] font-black text-[#07111F] leading-none tracking-tight">
-                  {formatARS(p.price)}
+              {editingPrice ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[18px] font-bold text-gray-400">$</span>
+                  <input
+                    ref={priceInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    value={priceInput}
+                    onChange={e => setPriceInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveField('price', priceInput); if (e.key === 'Escape') cancelEdit(); }}
+                    className="w-full text-[28px] font-black text-[#07111F] bg-[#0784F2]/5 border-b-2 border-[#0784F2] focus:outline-none px-1 rounded-t-lg"
+                    placeholder="0"
+                  />
+                  <button onClick={() => saveField('price', priceInput)} disabled={saving} className="shrink-0 px-2 py-1 bg-[#0784F2] text-white text-[10px] font-bold rounded-lg disabled:opacity-50">
+                    {saving ? '…' : 'OK'}
+                  </button>
+                  <button onClick={cancelEdit} className="shrink-0 px-2 py-1 bg-gray-100 text-gray-500 text-[10px] font-bold rounded-lg">✕</button>
                 </div>
               ) : (
-                <div className="text-xl font-bold text-[#EF4444]">Sin precio</div>
+                <button
+                  onClick={startEditPrice}
+                  title="Click para editar precio"
+                  className="group text-left hover:opacity-80 transition-opacity"
+                >
+                  {p.price > 1 ? (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[32px] font-black text-[#07111F] leading-none tracking-tight">
+                        {formatARS(p.price)}
+                      </span>
+                      <Edit2 className="w-3.5 h-3.5 text-gray-300 group-hover:text-[#0784F2] transition-colors mt-1" />
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xl font-bold text-[#EF4444]">Sin precio</span>
+                      <Edit2 className="w-3.5 h-3.5 text-[#EF4444]/50 group-hover:text-[#EF4444]" />
+                    </div>
+                  )}
+                </button>
               )}
-              <div className="text-[10px] text-gray-400 mt-1">list_price · IVA incluido</div>
+              <div className="text-[10px] text-gray-400 mt-1">list_price · IVA incluido · click para editar</div>
             </div>
 
             {/* Margen pill */}
@@ -528,16 +617,52 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive }:
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <div className="bg-gray-50 rounded-xl px-3 py-2.5">
-              <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide mb-1">
-                Costo neto
+            {/* COSTO EDITABLE */}
+            {editingCost ? (
+              <div className="bg-[#0784F2]/5 border border-[#0784F2]/30 rounded-xl px-3 py-2.5">
+                <div className="text-[9px] text-[#0784F2] font-semibold uppercase tracking-wide mb-1">
+                  Costo neto · editando
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] text-gray-500">$</span>
+                  <input
+                    ref={costInputRef}
+                    type="text"
+                    inputMode="decimal"
+                    value={costInput}
+                    onChange={e => setCostInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveField('cost', costInput); if (e.key === 'Escape') cancelEdit(); }}
+                    className="flex-1 min-w-0 text-[14px] font-bold text-[#07111F] bg-transparent border-b border-[#0784F2] focus:outline-none"
+                    placeholder="0"
+                  />
+                  <button onClick={() => saveField('cost', costInput)} disabled={saving} className="px-1.5 py-0.5 bg-[#0784F2] text-white text-[9px] font-bold rounded">
+                    {saving ? '…' : 'OK'}
+                  </button>
+                  <button onClick={cancelEdit} className="px-1 py-0.5 text-gray-400 text-[9px] font-bold">✕</button>
+                </div>
               </div>
-              <div className="text-[15px] font-bold text-[#07111F]">
-                {p.cost > 0
-                  ? formatARS(p.cost)
-                  : <span className="text-gray-400 text-[12px] font-medium">—</span>}
-              </div>
-            </div>
+            ) : (
+              <button
+                onClick={startEditCost}
+                title="Click para editar costo"
+                className={cn(
+                  'group text-left rounded-xl px-3 py-2.5 transition-colors',
+                  p.cost > 0 ? 'bg-gray-50 hover:bg-[#0784F2]/5' : 'bg-[#F97316]/8 border border-[#F97316]/20 hover:bg-[#F97316]/15',
+                )}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide">
+                    Costo neto
+                  </span>
+                  <Edit2 className="w-3 h-3 text-gray-300 group-hover:text-[#0784F2] transition-colors" />
+                </div>
+                <div className="text-[15px] font-bold text-[#07111F]">
+                  {p.cost > 0
+                    ? formatARS(p.cost)
+                    : <span className="text-[#F97316] text-[12px] font-bold">+ Agregar costo</span>}
+                </div>
+              </button>
+            )}
             <div className="bg-gray-50 rounded-xl px-3 py-2.5">
               <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide mb-1">
                 Utilidad
@@ -937,8 +1062,12 @@ export default function ProductosPage() {
   // Callback que recibe el toggle del inspector
   const handleToggleActive = (id: string, active: boolean) => {
     setActiveMap(prev => ({ ...prev, [id]: active }));
-    // Si el producto seleccionado es el que se toggleó, actualizar el objeto
     setSelected(prev => prev && prev.id === id ? { ...prev, active } : prev);
+  };
+
+  // ── Actualizar costo/precio desde el inspector ──
+  const handleProductUpdate = (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number }) => {
+    setSelected(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
   };
 
   // ── Leer filtros desde URL params (viene del Socio Acqua / consultor) ──
@@ -1078,7 +1207,7 @@ export default function ProductosPage() {
       <div className="max-w-[1680px] mx-auto px-5 lg:px-8 xl:px-12 py-5">
         <div className={cn(
           'grid grid-cols-1 gap-6 items-start',
-          inspectorOpen && 'lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_420px]',
+          inspectorOpen && 'lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px] 2xl:grid-cols-[minmax(0,1fr)_440px]',
         )}>
 
           {/* ─────── COLUMNA IZQUIERDA ─────── */}
@@ -1567,7 +1696,7 @@ export default function ProductosPage() {
           {inspectorOpen && (
             <div className="hidden lg:block">
               <div className="sticky top-4">
-                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} />}
+                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} />}
               </div>
             </div>
           )}
@@ -1577,7 +1706,7 @@ export default function ProductosPage() {
         {/* Inspector mobile (debajo de la lista) */}
         {inspectorOpen && (
           <div className="lg:hidden mt-5">
-            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} />
+            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} />
           </div>
         )}
 

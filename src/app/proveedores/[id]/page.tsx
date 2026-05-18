@@ -1253,7 +1253,43 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
   const [fileName,    setFileName]    = useState('');
   const [fileType,    setFileType]    = useState<'excel' | 'image' | 'pdf' | ''>('');
   const [error,       setError]       = useState('');
+  const [savedAt,     setSavedAt]     = useState<string | null>(null);
+  const [savingCat,   setSavingCat]   = useState(false);
+  const [saveOk,      setSaveOk]      = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const supplierSlug = supplierName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+  // ── Cargar catálogo guardado al abrir ──────────────────────────────────
+  useEffect(() => {
+    fetch(`/api/supplier-catalog?slug=${encodeURIComponent(supplierSlug)}`)
+      .then(r => r.json())
+      .then((data: { savedAt?: string; items?: CatalogItem[]; currency?: 'USD'|'ARS'|'unknown'; usdRate?: number } | null) => {
+        if (data?.items?.length) {
+          setItems(data.items);
+          setCurrency(data.currency ?? 'USD');
+          if (data.usdRate) setUsdRate(data.usdRate);
+          setSavedAt(data.savedAt ?? null);
+          setPhase('ready');
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierSlug]);
+
+  const saveCatalog = async () => {
+    if (!items.length) return;
+    setSavingCat(true);
+    try {
+      const res = await fetch('/api/supplier-catalog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierSlug, supplierName, currency, usdRate, items }),
+      });
+      const data = await res.json() as { ok: boolean; savedAt?: string };
+      if (data.ok) { setSavedAt(data.savedAt ?? new Date().toISOString()); setSaveOk(true); setTimeout(() => setSaveOk(false), 2500); }
+    } finally { setSavingCat(false); }
+  };
 
   const sheetNames = useMemo(() => ['todas', ...Array.from(new Set(items.map(i => i.sheet)))], [items]);
 
@@ -1353,7 +1389,10 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
               {fileType && <span className="text-[11px] font-normal text-gray-400">{ftypeIcon} {fileName}</span>}
             </h3>
             {(phase === 'ready' || phase === 'review') && (
-              <p className="text-[11px] text-gray-400 mt-0.5">{stats.total} productos · <span className="text-success font-semibold">{stats.acqua} ya en Acqua</span> · {stats.nuevo} nuevos</p>
+              <div className="flex items-center gap-3 mt-0.5">
+                <p className="text-[11px] text-gray-400">{stats.total} productos · <span className="text-success font-semibold">{stats.acqua} ya en Acqua</span> · {stats.nuevo} nuevos</p>
+                {savedAt && <span className="text-[10px] text-gray-300">Guardado {new Date(savedAt).toLocaleDateString('es-AR', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })}</span>}
+              </div>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -1380,6 +1419,21 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey }: {
                   </button>
                 </div>
               </>
+            )}
+            {(phase === 'ready' || phase === 'review') && items.length > 0 && (
+              <button
+                onClick={saveCatalog}
+                disabled={savingCat}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-colors',
+                  saveOk
+                    ? 'bg-success/10 text-success border border-success/20'
+                    : 'bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100',
+                  savingCat && 'opacity-50',
+                )}
+              >
+                {saveOk ? '✓ Guardado' : savingCat ? '…' : '💾 Guardar catálogo'}
+              </button>
             )}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
               <X className="w-4 h-4" />
