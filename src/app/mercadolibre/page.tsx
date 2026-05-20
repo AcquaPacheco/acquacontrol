@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import productsData from '@/data/products.json';
 import { cn } from '@/lib/utils';
@@ -10,7 +11,7 @@ import { loadGeminiKey, saveGeminiKey, clearGeminiKey } from '@/lib/gemini-key';
 import {
   parseOdooRows, parseMLRows, matchAndBuild, calcProfitability,
   calcIdealPrice, generateScenarios, generateConsultantReport, generateAlerts,
-  buildOdooExportRows, parseNum,
+  buildOdooExportRows, parseNum, inspectOdooHeaders,
 } from '@/lib/ml-lab-engine';
 import type { MLLabProduct, MLProductParams, MLSyncStatus, ScenarioKey } from '@/lib/ml-lab-types';
 import { DEFAULT_ML_PARAMS } from '@/lib/ml-lab-types';
@@ -75,7 +76,8 @@ function SyncBadge({ status }: { status: MLSyncStatus }) {
   );
 }
 
-function MarginBadge({ value, minMargin }: { value: number; minMargin: number }) {
+function MarginBadge({ value, minMargin }: { value: number | null | undefined; minMargin: number }) {
+  if (value == null || !isFinite(value)) return null;
   const color = value >= minMargin ? 'bg-[#16A34A] text-white'
               : value >= 0         ? 'bg-[#F97316] text-white'
               :                      'bg-[#EF4444] text-white';
@@ -224,11 +226,57 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
           fileName={odooName}
           onFile={(rows, name) => { setOdooRows(rows); setOdooName(name); setResult(null); }}
         />
-        {hasOdoo && (
-          <p className="text-[11px] text-[#16A34A] mt-2 font-semibold">
-            ✓ {odooRows.length - 1} reglas detectadas — columnas: {(odooRows[0] as string[]).slice(0, 5).join(', ')}…
-          </p>
-        )}
+        {hasOdoo && (() => {
+          const info = inspectOdooHeaders(odooRows);
+          const ok   = info.markupCol !== null || info.isPrintFormat;
+          const formatLabel = info.isPrintFormat
+            ? '📄 Formato reporte Odoo (% utilidad en texto)'
+            : info.isPricelist ? '📊 Lista de precios Odoo (columnas raw)'
+            : '📋 Formato genérico';
+          return (
+            <div className="mt-2 space-y-2">
+              <div className={cn(
+                'flex items-start gap-2 px-3 py-2.5 rounded-xl text-[11px] border',
+                ok ? 'bg-[#16A34A]/10 border-[#16A34A]/20' : 'bg-[#EF4444]/10 border-[#EF4444]/20',
+              )}>
+                <span className="shrink-0 mt-0.5">{ok ? '✅' : '❌'}</span>
+                <div>
+                  <p className={cn('font-bold', ok ? 'text-[#16A34A]' : 'text-[#EF4444]')}>
+                    {info.rowCount} reglas detectadas — {formatLabel}
+                  </p>
+                  {ok && (
+                    <p className="text-gray-500 mt-0.5">
+                      Markup: <strong className="text-gray-700">{info.markupCol}</strong>
+                    </p>
+                  )}
+                </div>
+              </div>
+              {!info.isPrintFormat && (
+                <details className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-[10px] text-gray-500 cursor-pointer">
+                  <summary className="font-semibold text-gray-600 select-none">Ver todas las columnas ({info.allHeaders.length})</summary>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {info.allHeaders.map((h, i) => (
+                      <span key={i} className={cn(
+                        'px-1.5 py-0.5 rounded text-[9px] font-mono border',
+                        h === info.markupCol ? 'bg-[#16A34A] text-white border-transparent font-bold' :
+                        h === info.nameCol   ? 'bg-[#0784F2] text-white border-transparent' :
+                        'bg-white border-gray-200 text-gray-500',
+                      )}>
+                        {h || '(vacío)'}
+                      </span>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {!ok && (
+                <div className="bg-[#FEF2F2] border border-[#EF4444]/20 rounded-xl p-3 text-[11px] text-[#991B1B] space-y-1">
+                  <p className="font-bold">⚠️ No se encontró el formato correcto</p>
+                  <p>Exportá desde Odoo → Lista de precios ML → Imprimir, o usá el botón Export desde la vista lista.</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Step 2 */}
@@ -310,19 +358,170 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD TAB
+// ML PRODUCT CARD — styled like a MercadoLibre listing card
 // ─────────────────────────────────────────────────────────────────────────────
+
+function MLProductCard({
+  p,
+  isSelected,
+  onSelect,
+  onThumbFetched,
+}: {
+  p: MLLabProduct;
+  isSelected: boolean;
+  onSelect: () => void;
+  onThumbFetched?: (id: string, url: string) => void;
+}) {
+  const [thumb, setThumb] = useState<string | null>(p.mlThumbnail ?? p.image ?? null);
+
+  // Fetch thumbnail from ML public API when none available
+  useEffect(() => {
+    if (thumb || !p.mlItemId) return;
+    let cancelled = false;
+    fetch(`https://api.mercadolibre.com/items/${p.mlItemId}?attributes=thumbnail`)
+      .then(r => r.ok ? r.json() : null)
+      .then((d: { thumbnail?: string } | null) => {
+        if (!cancelled && d?.thumbnail) {
+          setThumb(d.thumbnail);
+          onThumbFetched?.(p.id, d.thumbnail);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [p.mlItemId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep thumb in sync if product updates externally
+  useEffect(() => {
+    if (p.mlThumbnail && p.mlThumbnail !== thumb) setThumb(p.mlThumbnail);
+  }, [p.mlThumbnail]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const margin = p.calc?.netMargin;
+  const price  = p.mlPrice || p.odooListML || 0;
+  const marginColor =
+    p.calc?.status === 'pierde'      ? 'bg-[#EF4444] text-white' :
+    p.calc?.status === 'bajo_margen' ? 'bg-[#F97316] text-white' :
+    p.calc?.status === 'rentable'    ? 'bg-[#00A650] text-white' :
+    'bg-gray-100 text-gray-500';
+  const borderColor =
+    isSelected
+      ? p.calc?.status === 'pierde'      ? 'border-[#EF4444]' :
+        p.calc?.status === 'bajo_margen' ? 'border-[#F97316]' :
+        p.calc?.status === 'rentable'    ? 'border-[#00A650]' :
+        'border-[#3483FA]'
+      : 'border-transparent';
+
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        'w-full text-left flex gap-3 px-3 py-2.5 rounded-xl border transition-all',
+        isSelected
+          ? 'bg-white shadow-sm ' + borderColor
+          : 'border-transparent hover:bg-white hover:shadow-sm',
+      )}
+    >
+      {/* Thumbnail — ML style (square, light bg) */}
+      <div className="w-[52px] h-[52px] shrink-0 rounded-lg overflow-hidden bg-[#EBEBEB] flex items-center justify-center">
+        {thumb ? (
+          <img
+            src={thumb}
+            alt={p.name}
+            className="w-full h-full object-contain"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <Package className="w-6 h-6 text-[#C8C8C8]" />
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0">
+        {/* Title — ML uses gray-800, 2 lines max */}
+        <p className="text-[12px] text-[#333333] leading-snug line-clamp-2 font-normal">
+          {p.name}
+        </p>
+
+        {/* Price — ML blue, bold */}
+        {price > 0 && (
+          <p className="text-[15px] font-semibold text-[#3483FA] mt-0.5 leading-none">
+            {ars(price)}
+          </p>
+        )}
+
+        {/* Condition chips */}
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
+          {p.mlFreeShipping && (
+            <span className="text-[10px] font-semibold text-[#00A650]">Envío gratis</span>
+          )}
+          {p.mlHasInstallments && (
+            <span className="text-[10px] text-gray-500">en cuotas</span>
+          )}
+          {p.mlSold !== undefined && p.mlSold > 0 && (
+            <span className="text-[10px] text-gray-400">{p.mlSold} vendidos</span>
+          )}
+        </div>
+      </div>
+
+      {/* Margin badge — internal data */}
+      {margin != null && isFinite(margin) && (
+        <div className="shrink-0 flex flex-col items-end justify-start pt-0.5">
+          <span className={cn('text-[10px] font-black px-2 py-0.5 rounded-full', marginColor)}>
+            {margin.toFixed(0)}%
+          </span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD TAB — Centro de Comandos split-pane
+// ─────────────────────────────────────────────────────────────────────────────
+
+type DashFilter = 'todos' | 'pierde' | 'bajo_margen' | 'rentable' | 'sin_datos';
 
 function DashboardTab({
   store,
-  onSelectProduct,
   onGoToImport,
+  geminiKey,
 }: {
   store: ReturnType<typeof useMLLabStore>;
-  onSelectProduct: (id: string) => void;
   onGoToImport: () => void;
+  geminiKey?: string;
 }) {
   const { stats, products, globalParams } = store;
+  const [selectedId,  setSelectedId]  = useState<string | null>(null);
+  const [filter,      setFilter]      = useState<DashFilter>('todos');
+  const [search,      setSearch]      = useState('');
+  const [showSidebar, setShowSidebar] = useState(true);
+
+  const selectedProduct = useMemo(
+    () => products.find(p => p.id === selectedId) ?? null,
+    [products, selectedId],
+  );
+
+  // ── Groups ─────────────────────────────────────────────────────────────────
+  const grouped = useMemo(() => {
+    const q = search.toLowerCase();
+    const base = q
+      ? products.filter(p =>
+          p.name.toLowerCase().includes(q) ||
+          (p.sku ?? '').toLowerCase().includes(q) ||
+          (p.mlItemId ?? '').toLowerCase().includes(q),
+        )
+      : products;
+
+    const pierde     = base.filter(p => p.calc?.status === 'pierde');
+    const bajoMargen = base.filter(p => p.calc?.status === 'bajo_margen');
+    const sinDatos   = base.filter(p => !p.calc && p.syncStatus !== 'sincronizado');
+    const rentable   = base.filter(p => p.calc?.status === 'rentable');
+
+    if (filter === 'pierde')      return { pierde, bajoMargen: [], sinDatos: [], rentable: [] };
+    if (filter === 'bajo_margen') return { pierde: [], bajoMargen, sinDatos: [], rentable: [] };
+    if (filter === 'sin_datos')   return { pierde: [], bajoMargen: [], sinDatos, rentable: [] };
+    if (filter === 'rentable')    return { pierde: [], bajoMargen: [], sinDatos: [], rentable };
+    return { pierde, bajoMargen, sinDatos, rentable };
+  }, [products, filter, search]);
 
   if (products.length === 0) {
     return (
@@ -332,11 +531,11 @@ function DashboardTab({
         </div>
         <h2 className="text-2xl font-bold text-gray-900 mb-3">Espejo maestro vacío</h2>
         <p className="text-gray-500 text-[14px] max-w-md leading-relaxed mb-6">
-          Todavía no hay datos. Importá la regla de precio de Odoo y las publicaciones de MercadoLibre para generar el espejo maestro.
+          Importá la regla de precio Odoo y las publicaciones de ML para generar el espejo.
         </p>
         <button
           onClick={onGoToImport}
-          className="flex items-center gap-2 px-6 py-3 bg-[#07111F] text-[#FFE600] rounded-xl font-bold text-[13px] hover:opacity-90 transition-opacity"
+          className="flex items-center gap-2 px-6 py-3 bg-[#07111F] text-[#FFE600] rounded-xl font-bold text-[13px] hover:opacity-90"
         >
           <Upload className="w-4 h-4" /> Importar archivos
         </button>
@@ -344,157 +543,379 @@ function DashboardTab({
     );
   }
 
-  // Priority: products needing urgent attention (sorted by alert priority)
-  const urgent = [...products]
-    .filter(p => p.alerts.length > 0 && p.alerts[0].type === 'danger')
-    .sort((a, b) => (a.alerts[0]?.priority ?? 9) - (b.alerts[0]?.priority ?? 9))
-    .slice(0, 5);
+  const totalWithCalc = stats.rentables + stats.bajoMargen + stats.pierde;
+  const rentPct  = totalWithCalc > 0 ? Math.round(stats.rentables  / totalWithCalc * 100) : 0;
+  const bajoPct  = totalWithCalc > 0 ? Math.round(stats.bajoMargen / totalWithCalc * 100) : 0;
+  const pierdePct= totalWithCalc > 0 ? Math.round(stats.pierde     / totalWithCalc * 100) : 0;
 
-  // Opportunities: rentable + high sales or good margin
-  const opportunities = [...products]
-    .filter(p => p.calc?.status === 'rentable' && p.mlPrice && p.cost > 0)
-    .sort((a, b) => (b.mlSold ?? 0) - (a.mlSold ?? 0))
-    .slice(0, 4);
-
-  // Products that need review (bajo_margen + has ML pub)
-  const needReview = [...products]
-    .filter(p => (p.calc?.status === 'bajo_margen' || p.syncStatus === 'precio_desalineado') && p.mlItemId)
-    .slice(0, 5);
+  const Section = ({ title, color, items }: { title: string; color: string; items: MLLabProduct[] }) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="mb-2">
+        <p className={cn('text-[10px] font-black uppercase tracking-widest px-3 py-1.5 sticky top-0 bg-white z-10 border-b border-gray-100', color)}>
+          {title} · {items.length}
+        </p>
+        <div className="space-y-0.5 px-2 py-1">
+          {items.map(p => (
+            <MLProductCard
+              key={p.id}
+              p={p}
+              isSelected={p.id === selectedId}
+              onSelect={() => setSelectedId(prev => prev === p.id ? null : p.id)}
+              onThumbFetched={(id, url) => store.updateProduct(id, { mlThumbnail: url })}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="p-5 lg:p-6 space-y-6">
+    <div className="flex h-full overflow-hidden">
 
-      {/* ── Stats cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        {[
-          { label: 'Total',       value: stats.total,         color: 'text-gray-900', bg: 'bg-white' },
-          { label: 'Sincronizados',value: stats.sincronizados, color: 'text-[#16A34A]', bg: 'bg-[#16A34A]/5' },
-          { label: 'Rentables',   value: stats.rentables,     color: 'text-[#16A34A]', bg: 'bg-[#16A34A]/5' },
-          { label: 'Bajo margen', value: stats.bajoMargen,    color: 'text-[#F97316]', bg: 'bg-[#F97316]/5' },
-          { label: 'Pierden',     value: stats.pierde,        color: 'text-[#EF4444]', bg: 'bg-[#EF4444]/5' },
-          { label: 'Sin costo',   value: stats.sinCosto,      color: 'text-gray-400',  bg: 'bg-gray-50' },
-        ].map(s => (
-          <div key={s.label} className={cn('rounded-2xl border border-gray-100 p-4 shadow-sm', s.bg)}>
-            <div className={cn('text-3xl font-black', s.color)}>{s.value}</div>
-            <div className="text-[10px] text-gray-400 uppercase tracking-wide mt-1">{s.label}</div>
+      {/* ── LEFT: product list ── ML white sidebar ───────────────────────────── */}
+      <div className={cn(
+        'shrink-0 flex flex-col border-r border-gray-200 bg-white overflow-hidden transition-all duration-200',
+        showSidebar ? 'w-[280px] lg:w-[320px] xl:w-[360px]' : 'w-0 border-r-0',
+      )}>
+
+        {/* Search + filter chips */}
+        <div className="p-3 space-y-2 border-b border-gray-200 bg-white shrink-0 min-w-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar producto, SKU…"
+              className="w-full pl-8 pr-3 py-1.5 bg-gray-100 rounded-lg text-[12px] outline-none focus:ring-2 focus:ring-[#FFE600]/50"
+            />
           </div>
-        ))}
-      </div>
-
-      <div className="grid lg:grid-cols-3 gap-5">
-
-        {/* ── URGENTE ── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-4 h-4 text-[#EF4444]" />
-            <h3 className="text-[13px] font-bold text-gray-900">Urgente — revisar hoy</h3>
+          <div className="flex flex-wrap gap-1">
+            {([
+              { key: 'todos',      label: `Todo (${products.length})`,   cls: 'bg-gray-900 text-white' },
+              { key: 'pierde',     label: `🔴 ${stats.pierde}`,          cls: 'bg-[#EF4444] text-white' },
+              { key: 'bajo_margen',label: `🟡 ${stats.bajoMargen}`,      cls: 'bg-[#F97316] text-white' },
+              { key: 'rentable',   label: `🟢 ${stats.rentables}`,       cls: 'bg-[#16A34A] text-white' },
+              { key: 'sin_datos',  label: `⚪ Sin datos`,                 cls: 'bg-gray-500 text-white' },
+            ] as { key: DashFilter; label: string; cls: string }[]).map(f => (
+              <button
+                key={f.key}
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  'px-2.5 py-1 rounded-full text-[10px] font-bold transition-all',
+                  filter === f.key ? f.cls : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+                )}
+              >{f.label}</button>
+            ))}
           </div>
-          {urgent.length === 0 ? (
-            <div className="text-center py-4 text-[12px] text-gray-400">
-              <CheckCircle2 className="w-6 h-6 mx-auto mb-2 text-[#16A34A]" />
-              Sin alertas críticas
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {urgent.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => onSelectProduct(p.id)}
-                  className="w-full text-left p-3 rounded-xl bg-[#EF4444]/5 border border-[#EF4444]/15 hover:bg-[#EF4444]/10 transition-colors group"
-                >
-                  <p className="text-[12px] font-semibold text-gray-900 line-clamp-1 group-hover:text-[#EF4444]">{p.name}</p>
-                  <p className="text-[10px] text-[#EF4444] mt-0.5">{p.alerts[0]?.message}</p>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* ── OPORTUNIDADES ── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp className="w-4 h-4 text-[#16A34A]" />
-            <h3 className="text-[13px] font-bold text-gray-900">¿Dónde puedo hacer plata hoy?</h3>
+        {/* Product list */}
+        <div className="flex-1 overflow-y-auto">
+          <Section title="🔴 Perdiendo dinero" color="text-[#EF4444]" items={grouped.pierde} />
+          <Section title="🟡 Bajo margen"      color="text-[#F97316]" items={grouped.bajoMargen} />
+          <Section title="⚪ Sin datos / regla" color="text-gray-400"  items={grouped.sinDatos} />
+          <Section title="🟢 Rentables"         color="text-[#16A34A]" items={grouped.rentable} />
+        </div>
+      </div>
+
+      {/* ── RIGHT: overview or product detail ──────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto min-w-0">
+
+        {/* Toggle sidebar btn */}
+        <button
+          onClick={() => setShowSidebar(v => !v)}
+          className="absolute z-20 m-2 p-1.5 bg-white border border-gray-200 rounded-lg shadow-sm text-gray-500 hover:text-gray-800 transition-colors"
+          title={showSidebar ? 'Ocultar lista' : 'Mostrar lista'}
+        >
+          <List className="w-3.5 h-3.5" />
+        </button>
+
+        {selectedProduct ? (
+          /* ── PRODUCT FICHA ── */
+          <div className="h-full flex flex-col">
+            <ProductFicha
+              product={selectedProduct}
+              store={store}
+              onClose={() => setSelectedId(null)}
+              geminiKey={geminiKey ?? ''}
+            />
           </div>
-          {opportunities.length === 0 ? (
-            <p className="text-[12px] text-gray-400 text-center py-4">Sin oportunidades detectadas aún.</p>
-          ) : (
-            <div className="space-y-2">
-              {opportunities.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => onSelectProduct(p.id)}
-                  className="w-full text-left p-3 rounded-xl bg-[#16A34A]/5 border border-[#16A34A]/15 hover:bg-[#16A34A]/10 transition-colors group"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-[12px] font-semibold text-gray-900 line-clamp-1 group-hover:text-[#16A34A]">{p.name}</p>
-                    <MarginBadge value={p.calc!.netMargin} minMargin={globalParams.minMargin} />
+        ) : (() => {
+          /* ── SOCIO ACTIVO — Daily briefing ── */
+
+          // --- Data calculations ---
+          const now        = new Date();
+          const hour       = now.getHours();
+          const dayNames   = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+          const monthNames = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+          const greeting   = hour < 12 ? '¡Buenos días!' : hour < 18 ? '¡Buenas tardes!' : '¡Buenas noches!';
+          const greetEmoji = hour < 12 ? '🌅' : hour < 18 ? '☀️' : '🌙';
+          const dateStr    = `${dayNames[now.getDay()]}, ${now.getDate()} de ${monthNames[now.getMonth()]}`;
+
+          const daysSince = store.lastImportAt
+            ? Math.floor((Date.now() - new Date(store.lastImportAt).getTime()) / (1000 * 60 * 60 * 24))
+            : null;
+
+          // Inventory issues (from system products)
+          const sinCostoInv  = systemProducts.filter(p => (p as {active?:boolean}).active !== false && (!p.cost || p.cost === 0)).length;
+          const sinFotoInv   = systemProducts.filter(p => (p as {active?:boolean}).active !== false && !p.image).length;
+
+          // ML issues
+          const pierden       = products.filter(p => p.calc?.status === 'pierde');
+          const sinPublicar   = products.filter(p => p.syncStatus === 'sin_publicacion');
+          const matchDudoso   = products.filter(p => p.syncStatus === 'match_dudoso');
+
+          // Build prioritized action list
+          type ActionItem = {
+            priority: 'urgente' | 'importante' | 'mejora';
+            emoji: string;
+            title: string;
+            sub: string;
+            cta: string;
+            action?: () => void;
+            href?: string;
+            previews?: string[];
+          };
+          const items: ActionItem[] = [];
+
+          if (daysSince !== null && daysSince >= 3) {
+            items.push({
+              priority: daysSince >= 5 ? 'urgente' : 'importante',
+              emoji: '🔄',
+              title: daysSince === 0 ? 'Datos actualizados hoy' : daysSince === 1 ? 'Última actualización: ayer' : `Hace ${daysSince} días sin actualizar ML`,
+              sub: 'Los precios de ML y del mercado pueden haber cambiado. Subí los archivos de Odoo y Seller Center.',
+              cta: 'Actualizar ahora',
+              action: onGoToImport,
+            });
+          }
+
+          if (pierden.length > 0) {
+            items.push({
+              priority: 'urgente',
+              emoji: '🔴',
+              title: `${pierden.length} producto${pierden.length > 1 ? 's' : ''} perdiendo plata`,
+              sub: 'Cada venta de estos productos genera una pérdida. Hay que ajustar el precio o el markup urgente.',
+              cta: 'Ver y corregir',
+              action: () => setFilter('pierde'),
+              previews: pierden.slice(0, 3).map(p =>
+                `${p.name.split(' ').slice(0, 4).join(' ')} — ${p.calc?.netMargin?.toFixed(1)}% margen`
+              ),
+            });
+          }
+
+          if (sinCostoInv > 0) {
+            items.push({
+              priority: 'importante',
+              emoji: '💰',
+              title: `${sinCostoInv} productos sin costo en inventario`,
+              sub: 'Sin costo no puedo calcular rentabilidad ni darte recomendaciones de precio. Completá el costo en Odoo.',
+              cta: 'Ir a inventario',
+              href: '/productos?filter=noCost',
+            });
+          }
+
+          if (sinPublicar.length > 0) {
+            items.push({
+              priority: 'importante',
+              emoji: '📋',
+              title: `${sinPublicar.length} producto${sinPublicar.length > 1 ? 's' : ''} sin publicación en ML`,
+              sub: 'Tienen regla de precio en Odoo pero no están publicados. Podrías estar perdiendo ventas.',
+              cta: 'Ver productos',
+              action: () => setFilter('sin_datos'),
+            });
+          }
+
+          if (sinFotoInv > 0) {
+            items.push({
+              priority: 'mejora',
+              emoji: '📷',
+              title: `${sinFotoInv} productos sin foto`,
+              sub: 'Las fotos aumentan la conversión en ML. Agregá imágenes desde Odoo o directamente en la publicación.',
+              cta: 'Completar fotos',
+              href: '/productos',
+            });
+          }
+
+          if (matchDudoso.length > 0) {
+            items.push({
+              priority: 'mejora',
+              emoji: '🔗',
+              title: `${matchDudoso.length} matches dudosos`,
+              sub: 'Estos productos no matchearon con certeza entre Odoo y ML. Revisá que el SKU coincida.',
+              cta: 'Revisar',
+              action: () => setFilter('sin_datos'),
+            });
+          }
+
+          const pColor = {
+            urgente:   { card: 'bg-[#FEF2F2] border-[#EF4444]/25',   dot: 'bg-[#EF4444]',   label: 'Urgente',    labelCls: 'bg-[#EF4444] text-white',   btn: 'bg-[#EF4444] text-white hover:bg-red-600' },
+            importante:{ card: 'bg-[#FFFBEB] border-[#F97316]/25',   dot: 'bg-[#F97316]',   label: 'Importante', labelCls: 'bg-[#F97316] text-white',   btn: 'bg-[#07111F] text-white hover:opacity-80' },
+            mejora:    { card: 'bg-white border-gray-200',            dot: 'bg-[#0784F2]',   label: 'Mejora',     labelCls: 'bg-gray-100 text-gray-500', btn: 'bg-[#07111F] text-white hover:opacity-80' },
+          };
+
+          return (
+            <div className="h-full overflow-y-auto">
+
+              {/* ─── GREETING HEADER ─── */}
+              <div className="bg-[#07111F] px-6 pt-5 pb-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[#FFE600] text-[10px] font-bold uppercase tracking-[0.15em] mb-1">Acqua Control · Socio activo</p>
+                    <h2 className="text-white text-xl font-black">{greeting}</h2>
+                    <p className="text-white/50 text-[12px] mt-0.5 capitalize">{dateStr}</p>
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    {p.mlSold ? `${p.mlSold} vendidos · ` : ''}{ars(p.mlPrice!)} en ML
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+                  <div className="text-4xl shrink-0 select-none">{greetEmoji}</div>
+                </div>
 
-        {/* ── REVISAR PRECIO ── */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <Target className="w-4 h-4 text-[#F97316]" />
-            <h3 className="text-[13px] font-bold text-gray-900">Precios a corregir</h3>
-          </div>
-          {needReview.length === 0 ? (
-            <p className="text-[12px] text-gray-400 text-center py-4">Todos los precios están en orden.</p>
-          ) : (
-            <div className="space-y-2">
-              {needReview.map(p => {
-                const ideal = p.cost > 0 ? calcIdealPrice(p.cost, globalParams.idealMargin, globalParams) : 0;
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => onSelectProduct(p.id)}
-                    className="w-full text-left p-3 rounded-xl bg-[#F97316]/5 border border-[#F97316]/15 hover:bg-[#F97316]/10 transition-colors group"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-[12px] font-semibold text-gray-900 line-clamp-1 group-hover:text-[#F97316]">{p.name}</p>
-                      {p.calc && <MarginBadge value={p.calc.netMargin} minMargin={globalParams.minMargin} />}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400">
-                      <span>Actual: {p.mlPrice ? ars(p.mlPrice) : '—'}</span>
-                      {ideal > 0 && <><span>→</span><span className="text-[#16A34A] font-semibold">{ars(ideal)}</span></>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Sync status summary ── */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm">
-        <h3 className="text-[13px] font-bold text-gray-900 mb-4 flex items-center gap-2">
-          <BarChart3 className="w-4 h-4 text-[#0784F2]" />
-          Estado de sincronización
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {([
-            'sincronizado', 'match_dudoso', 'sin_publicacion',
-            'sin_regla_odoo', 'sin_costo', 'sin_stock', 'precio_desalineado', 'duplicado',
-          ] as MLSyncStatus[]).map(s => {
-            const m = SYNC_META[s];
-            const count = products.filter(p => p.syncStatus === s).length;
-            if (count === 0) return null;
-            return (
-              <div key={s} className={cn('rounded-xl p-3 border', m.bg, m.border)}>
-                <div className={cn('text-xl font-black', m.text)}>{count}</div>
-                <div className={cn('text-[10px] font-semibold mt-0.5', m.text)}>{m.label}</div>
+                {/* Last import strip */}
+                <div className={cn(
+                  'mt-4 px-4 py-3 rounded-xl border flex items-center justify-between gap-3',
+                  daysSince === null        ? 'bg-white/5 border-white/10' :
+                  daysSince >= 5            ? 'bg-[#EF4444]/20 border-[#EF4444]/30' :
+                  daysSince >= 3            ? 'bg-[#F97316]/20 border-[#F97316]/30' :
+                  'bg-[#16A34A]/20 border-[#16A34A]/30',
+                )}>
+                  <div>
+                    <p className={cn(
+                      'text-[12px] font-black',
+                      daysSince === null ? 'text-white/60' :
+                      daysSince >= 3    ? 'text-[#FFE600]' : 'text-white',
+                    )}>
+                      {daysSince === null    ? 'Sin datos importados todavía' :
+                       daysSince === 0       ? '✓ Datos actualizados hoy' :
+                       daysSince === 1       ? '⏰ Última actualización: ayer' :
+                       `⏰ Hace ${daysSince} días sin actualizar`}
+                    </p>
+                    {(daysSince ?? 0) >= 3 && (
+                      <p className="text-white/45 text-[10px] mt-0.5">Los precios de ML pueden haber cambiado</p>
+                    )}
+                  </div>
+                  {(daysSince === null || (daysSince ?? 0) >= 2) && (
+                    <button
+                      onClick={onGoToImport}
+                      className="shrink-0 px-3 py-1.5 bg-[#FFE600] text-[#07111F] text-[11px] font-black rounded-lg hover:opacity-90 transition-opacity whitespace-nowrap"
+                    >
+                      {daysSince === null ? 'Importar datos' : 'Actualizar →'}
+                    </button>
+                  )}
+                </div>
               </div>
-            );
-          })}
-        </div>
+
+              {/* ─── CATALOG HEALTH — compact strip ─── */}
+              <div className="px-5 pt-4 pb-1">
+                <div className="flex items-center gap-3 bg-white rounded-2xl border border-gray-100 px-4 py-3 shadow-sm">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex h-2.5 rounded-full overflow-hidden gap-px">
+                      {rentPct  > 0 && <div style={{ width: `${rentPct}%`    }} className="bg-[#16A34A]" />}
+                      {bajoPct  > 0 && <div style={{ width: `${bajoPct}%`    }} className="bg-[#F97316]" />}
+                      {pierdePct> 0 && <div style={{ width: `${pierdePct}%`  }} className="bg-[#EF4444]" />}
+                      <div className="flex-1 bg-gray-200" />
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5 text-[10px] text-gray-500 flex-wrap">
+                      <span className="flex items-center gap-1 font-semibold text-[#16A34A]"><span className="w-2 h-2 rounded-full bg-[#16A34A]"/>{stats.rentables} ok</span>
+                      <span className="flex items-center gap-1 font-semibold text-[#F97316]"><span className="w-2 h-2 rounded-full bg-[#F97316]"/>{stats.bajoMargen} bajo</span>
+                      <span className="flex items-center gap-1 font-semibold text-[#EF4444]"><span className="w-2 h-2 rounded-full bg-[#EF4444]"/>{stats.pierde} pierden</span>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-[20px] font-black text-gray-900">{stats.activas}</p>
+                    <p className="text-[9px] text-gray-400 uppercase tracking-wide">activas ML</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* ─── TODO LIST ─── */}
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Para hoy</p>
+                  {items.filter(i => i.priority === 'urgente').length > 0 && (
+                    <span className="px-2 py-0.5 bg-[#EF4444] text-white text-[9px] font-black rounded-full">
+                      {items.filter(i => i.priority === 'urgente').length} urgente{items.filter(i => i.priority === 'urgente').length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+
+                {items.length === 0 && (
+                  <div className="text-center py-10">
+                    <div className="text-5xl mb-4">🎯</div>
+                    <p className="text-[16px] font-black text-gray-900">¡Todo en orden!</p>
+                    <p className="text-[12px] text-gray-400 mt-1.5 max-w-xs mx-auto">
+                      No hay tareas urgentes hoy. Revisá oportunidades de mejora en las publicaciones.
+                    </p>
+                  </div>
+                )}
+
+                {items.map((item, i) => {
+                  const c = pColor[item.priority];
+                  return (
+                    <div key={i} className={cn('rounded-2xl border p-4 transition-all', c.card)}>
+                      <div className="flex items-start gap-3">
+                        <span className="text-2xl shrink-0 leading-none mt-0.5">{item.emoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                            <p className="text-[13px] font-black text-gray-900">{item.title}</p>
+                            <span className={cn('text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase tracking-wide', c.labelCls)}>
+                              {c.label}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-500 leading-snug">{item.sub}</p>
+                          {item.previews && item.previews.length > 0 && (
+                            <div className="mt-2 space-y-0.5">
+                              {item.previews.map((prev, j) => (
+                                <p key={j} className="text-[10px] text-gray-600 flex items-center gap-1.5">
+                                  <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', c.dot)} />
+                                  {prev}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex justify-end">
+                        {item.action ? (
+                          <button
+                            onClick={item.action}
+                            className={cn('px-4 py-2 text-[11px] font-black rounded-xl transition-colors', c.btn)}
+                          >
+                            {item.cta} →
+                          </button>
+                        ) : item.href ? (
+                          <Link
+                            href={item.href}
+                            className={cn('inline-block px-4 py-2 text-[11px] font-black rounded-xl transition-colors', c.btn)}
+                          >
+                            {item.cta} →
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ─── QUICK STATS GRID ─── */}
+              <div className="px-5 pb-6 grid grid-cols-2 gap-2">
+                {[
+                  { label: '🔴 Pierden plata', val: stats.pierde,      f: 'pierde'      as DashFilter, col: stats.pierde > 0      ? 'text-[#EF4444]' : 'text-gray-400' },
+                  { label: '🟡 Bajo margen',   val: stats.bajoMargen,  f: 'bajo_margen' as DashFilter, col: stats.bajoMargen > 0  ? 'text-[#F97316]' : 'text-gray-400' },
+                  { label: '🟢 Rentables',     val: stats.rentables,   f: 'rentable'    as DashFilter, col: 'text-[#16A34A]' },
+                  { label: '⚪ Sin datos',     val: stats.sinCosto + products.filter(p=>p.syncStatus==='sin_regla_odoo').length, f: 'sin_datos' as DashFilter, col: 'text-gray-400' },
+                ].map(c => (
+                  <button
+                    key={c.label}
+                    onClick={() => setFilter(c.f)}
+                    className="bg-white border border-gray-100 rounded-xl px-3 py-3 text-left hover:border-gray-300 hover:shadow-sm transition-all"
+                  >
+                    <div className={cn('text-2xl font-black', c.col)}>{c.val}</div>
+                    <div className="text-[10px] text-gray-500 mt-0.5">{c.label}</div>
+                  </button>
+                ))}
+              </div>
+
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
@@ -1034,6 +1455,21 @@ function ProductFicha({
   // Description generation state
   const [descText,   setDescText]  = useState('');
   const [descLoading,setDescLoading] = useState(false);
+  // Inline cost/markup editing
+  const [editingCost,   setEditingCost]   = useState(false);
+  const [editCostVal,   setEditCostVal]   = useState('');
+  const [editMarkupVal, setEditMarkupVal] = useState('');
+
+  const saveManualEdit = () => {
+    const newCost   = parseFloat(editCostVal.replace(/[^0-9.]/g, ''));
+    const newMarkup = parseFloat(editMarkupVal.replace(/[^0-9.]/g, ''));
+    if (isNaN(newCost) || newCost <= 0) { setEditingCost(false); return; }
+    const markup    = isNaN(newMarkup) ? product.markup : newMarkup;
+    const odooPrice = newCost * (1 + markup / 100);
+    const odooListML = odooPrice * 1.21;
+    store.updateProduct(product.id, { cost: newCost, markup, odooPrice, odooListML });
+    setEditingCost(false);
+  };
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1119,7 +1555,12 @@ function ProductFicha({
           })),
         }),
       });
-      if (!res.ok || !res.body) { setDescText('Error al generar. Revisá la API key.'); return; }
+      if (!res.ok || !res.body) {
+        const errData = await res.json().catch(() => null) as { error?: string } | null;
+        const msg = errData?.error ?? `Error ${res.status} al generar. Revisá la API key en Parámetros globales.`;
+        setDescText(msg);
+        return;
+      }
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let text = '';
@@ -1151,13 +1592,20 @@ function ProductFicha({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product.id]);
 
-  // Initialize chat when opening Consultor tab
+  // Initialize chat + auto-scout when opening Consultor tab
   useEffect(() => {
-    if (fichaTab === 'consultor' && !chatInitialized.current) {
-      chatInitialized.current = true;
-      setChatMessages([{ role: 'assistant', content: buildInitialMessage() }]);
+    if (fichaTab === 'consultor') {
+      if (!chatInitialized.current) {
+        chatInitialized.current = true;
+        setChatMessages([{ role: 'assistant', content: buildInitialMessage() }]);
+      }
+      // Auto-run scout if no data yet
+      if (scout.items.length === 0 && !scouting) {
+        void runScout();
+      }
     }
-  }, [fichaTab, buildInitialMessage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fichaTab]);
 
   // Reset chat when product changes
   useEffect(() => {
@@ -1313,20 +1761,52 @@ function ProductFicha({
           </div>
 
           {/* COSTO | ML | IDEAL grid */}
-          <div className="grid grid-cols-3 gap-1.5">
-            <div className="bg-white rounded-xl px-2 py-2 text-center border border-gray-100">
-              <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">Costo</div>
-              <div className="text-[12px] font-black text-gray-900">{product.cost > 0 ? ars(product.cost) : '—'}</div>
+          {editingCost ? (
+            <div className="bg-white rounded-xl border border-[#0784F2]/30 p-3 space-y-2">
+              <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Editar manualmente</p>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[9px] text-gray-400">Costo</label>
+                  <input
+                    type="number" value={editCostVal} onChange={e => setEditCostVal(e.target.value)}
+                    placeholder={String(product.cost)}
+                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-bold border border-gray-200 rounded-lg focus:outline-none focus:border-[#0784F2]"
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[9px] text-gray-400">Markup %</label>
+                  <input
+                    type="number" value={editMarkupVal} onChange={e => setEditMarkupVal(e.target.value)}
+                    placeholder={product.markup.toFixed(1)}
+                    className="w-full mt-0.5 px-2 py-1 text-[12px] font-bold border border-gray-200 rounded-lg focus:outline-none focus:border-[#0784F2]"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-1.5">
+                <button onClick={saveManualEdit} className="flex-1 py-1.5 bg-[#07111F] text-white text-[10px] font-bold rounded-lg">Guardar</button>
+                <button onClick={() => setEditingCost(false)} className="py-1.5 px-3 bg-gray-100 text-gray-600 text-[10px] font-bold rounded-lg">Cancelar</button>
+              </div>
             </div>
-            <div className="bg-[#FFE600]/10 rounded-xl px-2 py-2 text-center border border-[#FFE600]/20">
-              <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">ML</div>
-              <div className="text-[12px] font-black text-gray-900">{product.mlPrice ? ars(product.mlPrice) : '—'}</div>
+          ) : (
+            <div className="grid grid-cols-3 gap-1.5 group/grid">
+              <button
+                onClick={() => { setEditCostVal(String(product.cost)); setEditMarkupVal(product.markup.toFixed(1)); setEditingCost(true); }}
+                className="bg-white rounded-xl px-2 py-2 text-center border border-gray-100 hover:border-[#0784F2]/40 transition-colors"
+                title="Editar costo/markup"
+              >
+                <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">Costo</div>
+                <div className="text-[12px] font-black text-gray-900">{product.cost > 0 ? ars(product.cost) : '—'}</div>
+              </button>
+              <div className="bg-[#FFE600]/10 rounded-xl px-2 py-2 text-center border border-[#FFE600]/20">
+                <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">ML</div>
+                <div className="text-[12px] font-black text-gray-900">{product.mlPrice ? ars(product.mlPrice) : '—'}</div>
+              </div>
+              <div className="bg-[#16A34A]/5 rounded-xl px-2 py-2 text-center border border-[#16A34A]/15">
+                <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">Ideal</div>
+                <div className="text-[12px] font-black text-[#16A34A]">{idealPrice > 0 ? ars(idealPrice) : '—'}</div>
+              </div>
             </div>
-            <div className="bg-[#16A34A]/5 rounded-xl px-2 py-2 text-center border border-[#16A34A]/15">
-              <div className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide leading-tight mb-1">Ideal</div>
-              <div className="text-[12px] font-black text-[#16A34A]">{idealPrice > 0 ? ars(idealPrice) : '—'}</div>
-            </div>
-          </div>
+          )}
 
           {/* Alerts */}
           {product.alerts.slice(0, 3).map((a, i) => (
@@ -1578,30 +2058,180 @@ function ProductFicha({
               );
             })()}
 
-            {/* ── CONSULTOR (Chat) ── */}
+            {/* ── CONSULTOR ── */}
             {fichaTab === 'consultor' && (
               <div className="flex flex-col h-full min-h-0">
 
-                {/* Quick context strip */}
-                <div className="shrink-0 flex items-center gap-3 px-4 py-2 bg-gray-50 border-b border-gray-100">
-                  <div className={cn(
-                    'text-[11px] font-black tabular-nums px-2 py-0.5 rounded-lg',
-                    consultant.overallScore >= 70 ? 'bg-[#16A34A]/15 text-[#16A34A]' :
-                    consultant.overallScore >= 40 ? 'bg-[#F97316]/15 text-[#F97316]' : 'bg-[#EF4444]/15 text-[#EF4444]',
-                  )}>
-                    {consultant.overallScore}
+                {/* ─── Market competitor panel ─── */}
+                <div className="shrink-0 border-b border-gray-100 bg-gray-50/60">
+
+                  {/* Header strip */}
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+                    <div className={cn(
+                      'text-[11px] font-black tabular-nums px-2 py-0.5 rounded-lg shrink-0',
+                      consultant.overallScore >= 70 ? 'bg-[#16A34A]/15 text-[#16A34A]' :
+                      consultant.overallScore >= 40 ? 'bg-[#F97316]/15 text-[#F97316]' : 'bg-[#EF4444]/15 text-[#EF4444]',
+                    )}>
+                      {consultant.overallScore}
+                    </div>
+                    <span className={cn(
+                      'text-[11px] font-bold px-2 py-0.5 rounded-full flex-1 truncate',
+                      consultant.strategy === 'subir_markup' ? 'text-[#EF4444] bg-[#EF4444]/8' :
+                      consultant.strategy === 'pausar'       ? 'text-[#F97316] bg-[#F97316]/8' :
+                      consultant.strategy === 'mantener'     ? 'text-[#16A34A] bg-[#16A34A]/8' :
+                      'text-gray-700 bg-gray-100',
+                    )}>{consultant.strategyLabel}</span>
+                    {consultant.recommendedPrice > 0 && (
+                      <span className="text-[11px] font-black text-[#16A34A] shrink-0">
+                        → {ars(consultant.recommendedPrice)}
+                      </span>
+                    )}
+                    <button onClick={() => void runScout()} disabled={scouting} title="Actualizar mercado"
+                      className="flex items-center gap-1 px-2 py-1 bg-[#FFE600] text-gray-900 text-[10px] font-bold rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity shrink-0">
+                      {scouting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                      {scouting ? '…' : 'Mercado'}
+                    </button>
                   </div>
-                  <span className="text-[11px] font-semibold text-gray-700 flex-1 truncate">{consultant.strategyLabel}</span>
-                  {consultant.recommendedPrice > 0 && (
-                    <span className="text-[11px] font-bold text-[#16A34A] shrink-0">
-                      Sugerido: {ars(consultant.recommendedPrice)}
-                    </span>
+
+                  {/* Market stats */}
+                  {scout.market && (
+                    <div className="grid grid-cols-3 gap-2 px-4 pb-2">
+                      {[
+                        { label: 'Mínimo',   val: ars(scout.market.minPrice), color: 'text-[#EF4444]' },
+                        { label: 'Promedio', val: ars(scout.market.avgPrice), color: 'text-gray-900' },
+                        { label: 'Máximo',   val: ars(scout.market.maxPrice), color: 'text-[#16A34A]' },
+                      ].map(s => (
+                        <div key={s.label} className="bg-white rounded-lg border border-gray-100 px-2 py-1.5 text-center">
+                          <div className="text-[8px] text-gray-400 uppercase tracking-wide">{s.label}</div>
+                          <div className={cn('text-[12px] font-black', s.color)}>{s.val}</div>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  <button onClick={runScout} disabled={scouting} title="Escanear competencia ML"
-                    className="flex items-center gap-1 px-2 py-1 bg-[#FFE600] text-gray-900 text-[10px] font-bold rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity shrink-0">
-                    {scouting ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-                    {scouting ? '…' : 'Scout'}
-                  </button>
+
+                  {/* Conditions gap analysis */}
+                  {scout.items.length > 0 && (() => {
+                    const n = scout.items.length;
+                    const withShipping    = scout.items.filter(i => i.freeShipping).length;
+                    const withInstallments = scout.items.filter(i => i.installments !== null).length;
+                    const conditions = [
+                      {
+                        label: 'Envío gratis',
+                        mktPct: Math.round(withShipping / n * 100),
+                        weHave: product.mlFreeShipping ?? false,
+                        icon: '🚚',
+                      },
+                      {
+                        label: 'Cuotas sin interés',
+                        mktPct: Math.round(withInstallments / n * 100),
+                        weHave: product.mlHasInstallments ?? false,
+                        icon: '💳',
+                      },
+                    ];
+                    return (
+                      <div className="px-4 pb-2">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Condiciones del mercado</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {conditions.map(c => {
+                            const gap = !c.weHave && c.mktPct >= 50; // we're missing something most competitors have
+                            return (
+                              <div key={c.label} className={cn(
+                                'rounded-xl border p-2.5',
+                                gap ? 'bg-[#EF4444]/5 border-[#EF4444]/20' : c.weHave ? 'bg-[#16A34A]/5 border-[#16A34A]/20' : 'bg-gray-50 border-gray-100',
+                              )}>
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-[10px] font-semibold text-gray-700">{c.icon} {c.label}</span>
+                                  <span className={cn(
+                                    'text-[9px] font-black px-1.5 py-0.5 rounded-full',
+                                    c.weHave ? 'bg-[#16A34A] text-white' : gap ? 'bg-[#EF4444] text-white' : 'bg-gray-200 text-gray-500',
+                                  )}>
+                                    {c.weHave ? 'Tenés ✓' : gap ? 'Te falta ✗' : 'Opcional'}
+                                  </span>
+                                </div>
+                                {/* Market bar */}
+                                <div className="flex items-center gap-1.5">
+                                  <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                    <div
+                                      className={cn('h-full rounded-full', c.mktPct >= 70 ? 'bg-[#EF4444]' : c.mktPct >= 40 ? 'bg-[#F97316]' : 'bg-gray-300')}
+                                      style={{ width: `${c.mktPct}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[9px] text-gray-500 shrink-0">{c.mktPct}% compet.</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Top 5 competitor cards */}
+                  {scouting && scout.items.length === 0 && (
+                    <div className="flex items-center gap-2 px-4 pb-3 text-[11px] text-gray-400">
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Buscando competencia en ML…
+                    </div>
+                  )}
+                  {scout.items.length > 0 && (
+                    <div className="px-4 pb-3 space-y-1.5">
+                      <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-1">Top {scout.items.slice(0, 5).length} publicaciones</p>
+                      {scout.items.slice(0, 5).map((item, idx) => (
+                        <a
+                          key={item.id}
+                          href={item.permalink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2.5 p-2 rounded-xl border border-gray-100 bg-white hover:border-[#3483FA]/30 hover:bg-[#3483FA]/3 transition-colors group"
+                        >
+                          {/* Rank */}
+                          <span className="text-[9px] font-black text-gray-300 w-3 shrink-0">#{idx + 1}</span>
+                          {/* Thumbnail */}
+                          <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+                            {item.thumbnail
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={item.thumbnail} alt="" className="w-full h-full object-contain" />
+                              : <Package className="w-4 h-4 text-gray-300" />}
+                          </div>
+                          {/* Title + condition chips */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-semibold text-gray-800 line-clamp-1 leading-tight">{item.title}</p>
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              {item.freeShipping && (
+                                <span className="text-[7px] font-bold text-[#16A34A] bg-[#16A34A]/10 px-1 py-px rounded leading-none">🚚 gratis</span>
+                              )}
+                              {item.installments && (
+                                <span className="text-[7px] font-bold text-[#0784F2] bg-[#0784F2]/10 px-1 py-px rounded leading-none">💳 {item.installments.qty}x</span>
+                              )}
+                              {item.soldQty > 0 && (
+                                <span className="text-[7px] text-gray-400 bg-gray-100 px-1 py-px rounded leading-none">{item.soldQty} vend.</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Price */}
+                          <div className="text-right shrink-0">
+                            <div className="text-[12px] font-black text-gray-900">{ars(item.price)}</div>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action recommendation card */}
+                  {consultant.trialAction && (
+                    <div className={cn(
+                      'mx-4 mb-3 px-3 py-2.5 rounded-xl border text-[11px] leading-snug',
+                      consultant.strategy === 'subir_markup' || consultant.strategy === 'pausar'
+                        ? 'bg-[#EF4444]/5 border-[#EF4444]/20 text-[#EF4444]'
+                        : 'bg-[#07111F]/5 border-[#07111F]/15 text-gray-800',
+                    )}>
+                      <p className="font-black text-[10px] mb-1 uppercase tracking-wide">
+                        {consultant.strategy === 'subir_markup' ? '⚠️ Acción urgente' :
+                         consultant.strategy === 'pausar'       ? '🛑 Revisar' :
+                         '💡 Para vender más'}
+                      </p>
+                      {consultant.trialAction}
+                    </div>
+                  )}
                 </div>
 
                 {/* Chat messages */}
@@ -2071,13 +2701,13 @@ export default function MLLabPage() {
       {/* ── CONTENT ── */}
       <div className="flex-1 flex overflow-hidden max-w-[1920px] mx-auto w-full">
 
-        {/* Main area */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Main area — dashboard is full split, others scroll normally */}
+        <div className={cn('flex-1', activeTab === 'dashboard' ? 'overflow-hidden' : 'overflow-y-auto')}>
           {activeTab === 'dashboard' && (
             <DashboardTab
               store={store}
-              onSelectProduct={(id) => { handleSelectProduct(id); setActiveTab('tabla'); }}
               onGoToImport={() => setActiveTab('importar')}
+              geminiKey={geminiKey}
             />
           )}
           {activeTab === 'importar' && <ImportTab store={store} />}
@@ -2088,8 +2718,8 @@ export default function MLLabPage() {
         </div>
       </div>
 
-      {/* Product detail modal */}
-      {selectedProduct && (
+      {/* Product detail modal — only for Tabla tab */}
+      {selectedProduct && activeTab === 'tabla' && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onClick={e => { if (e.target === e.currentTarget) setSelectedId(null); }}

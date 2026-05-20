@@ -43,7 +43,8 @@ function normalizeSku(s: string): string {
  */
 function skuCore(s: string): string {
   return (s ?? '').trim().toLowerCase()
-    .replace(/^(v-|m-|mav-|mak-|ajp-|bvl-|kr-|reg-|ag-)/, '')
+    .replace(/^(v-|m-|mav-|mak-|ajp-|bvl-|kr-|reg-|ag-)/, '') // strip brand prefix
+    .replace(/^0+(?=\d)/, '')                                    // strip leading zeros (00001257→1257)
     .replace(/[\s'\-]/g, '');
 }
 
@@ -147,18 +148,162 @@ function isOdooPricelistFormat(headers: string[]): boolean {
   return headers.some(h => h.includes('item_ids/product_tmpl_id'));
 }
 
+/**
+ * Inspect the raw headers from an Odoo export and return debug info.
+ * Used by the ImportTab to show what was detected.
+ */
+export function inspectOdooHeaders(rows: unknown[][]): {
+  isPricelist: boolean;
+  isPrintFormat: boolean;
+  allHeaders: string[];
+  markupCol: string | null;
+  nameCol: string | null;
+  skuCol: string | null;
+  rowCount: number;
+} {
+  if (rows.length < 1) return { isPricelist: false, isPrintFormat: false, allHeaders: [], markupCol: null, nameCol: null, skuCol: null, rowCount: 0 };
+  const headers = rows[0].map(h => String(h ?? ''));
+  const isPricelist  = isOdooPricelistFormat(headers);
+  const isPrintFormat = isOdooPrintFormat(rows);
+
+  // Markup column candidates (in priority order — Odoo renames this across versions)
+  const MARKUP_CANDIDATES = [
+    'item_ids/price_markup',    // custom Odoo / some versions
+    'item_ids/price_discount',  // standard Odoo field (confusingly named, stores markup %)
+    'item_ids/percent_price',   // old Odoo 12/13
+    'item_ids/price_surcharge', // flat surcharge (not %, but fallback)
+    'item_ids/margen_de_ganancia',
+  ];
+  const markupCol = MARKUP_CANDIDATES.find(c => headers.some(h => h.toLowerCase() === c.toLowerCase())) ?? null;
+
+  return {
+    isPricelist,
+    isPrintFormat,
+    allHeaders: headers,
+    markupCol: isPrintFormat ? '(texto: "X % utilidad sobre el costo")' : markupCol,
+    nameCol: headers.find(h => h === 'item_ids/product_tmpl_id') ?? null,
+    skuCol:  headers.find(h => h.toLowerCase().includes('referencia') || h.toLowerCase().includes('sku')) ?? null,
+    rowCount: rows.length - 1,
+  };
+}
+
+/**
+ * Detect Odoo pricelist PRINT/REPORT format.
+ * Identified by a cell containing "X % utilidad sobre el costo" pattern.
+ * This is what Odoo exports when you print/export the pricelist report view.
+ */
+function isOdooPrintFormat(rows: unknown[][]): boolean {
+  for (const row of rows.slice(0, 40)) {
+    for (const cell of row) {
+      if (/\d+[.,]?\d*\s*%\s*(utilidad|markup|margen)/i.test(String(cell ?? ''))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Parse Odoo pricelist print format.
+ * Each product row has:
+ *   Col A: "[SKU] Product Name"   OR   "Product Name"
+ *   Col B: "105 % utilidad sobre el costo (%) en costo del producto"
+ *   Col C: "0,00"  (fixed surcharge — usually 0)
+ */
+function parseOdooPrintFormat(rows: unknown[][]): OdooMLRule[] {
+  const results: OdooMLRule[] = [];
+
+  // Words that indicate metadata rows (not products)
+  const META_RE = /^(mercado libre|moneda|empresa|grupos de paises|reglas de precio|comercio electronico|aplicar en|precio|acqua pacheco|ars$|pagina|\d+\s*\/\s*\d+)/i;
+
+  for (const row of rows) {
+    let markupRaw = 0;
+    let productName = '';
+    let fixedFee = 0;
+
+    for (const cell of row) {
+      const s = String(cell ?? '').trim();
+      if (!s) continue;
+
+      // ① Detect markup: "105 % utilidad sobre el costo"
+      const mUtilidad = s.match(/([\d.,]+)\s*%\s*(utilidad|markup|margen)/i);
+      if (mUtilidad && markupRaw === 0) {
+        markupRaw = parseNum(mUtilidad[1]);
+        continue;
+      }
+
+      // ② Detect fixed fee: small number like "0,00" or "1525"
+      if (markupRaw > 0 && /^[\d.,]+$/.test(s) && fixedFee === 0) {
+        const n = parseNum(s);
+        if (n >= 0 && n < 100000) fixedFee = n;
+        continue;
+      }
+
+      // ③ Detect product name: not metadata, not a pure number
+      if (!productName && s.length > 3 && !META_RE.test(s) && !/^\d+[.,]?\d*$/.test(s)) {
+        productName = s;
+      }
+    }
+
+    if (markupRaw > 0 && productName) {
+      const { sku, name } = extractOdooProductName(productName);
+      if (name) {
+        results.push({
+          sku,
+          name,
+          markup: markupRaw,
+          raw: { _fixedFee: fixedFee },
+        } as OdooMLRule);
+      }
+    }
+  }
+
+  return results;
+}
+
 /** Parse raw XLSX rows (header row + data rows) into OdooMLRule[] */
 export function parseOdooRows(rows: unknown[][]): OdooMLRule[] {
   if (rows.length < 2) return [];
   const headers = rows[0].map(h => String(h ?? ''));
 
+  // ── Odoo pricelist PRINT/REPORT format (highest priority) ────────────────
+  // Detected by "X % utilidad sobre el costo" pattern anywhere in first 40 rows
+  if (isOdooPrintFormat(rows)) {
+    return parseOdooPrintFormat(rows);
+  }
+
   // ── Odoo pricelist export format ─────────────────────────────────────────
-  // Headers: id | item_ids/product_tmpl_id/id | applied_on | name |
-  //          compute_price | price_round | price_markup | item_ids/product_tmpl_id | base
+  // Odoo can export the markup/discount % under several column names depending on version:
+  //   - item_ids/price_markup   (some custom/v17 builds)
+  //   - item_ids/price_discount (standard Odoo model field — stores the "Margen de ganancia" %)
+  //   - item_ids/percent_price  (Odoo 12/13 legacy)
   if (isOdooPricelistFormat(headers)) {
-    const iExtId  = headers.indexOf('item_ids/product_tmpl_id/id');
-    const iMarkup = headers.indexOf('item_ids/price_markup');
-    const iName   = headers.indexOf('item_ids/product_tmpl_id');
+    const iExtId  = headers.findIndex(h => h === 'item_ids/product_tmpl_id/id');
+    const iName   = headers.findIndex(h => h === 'item_ids/product_tmpl_id');
+    // Try all known markup column names in priority order
+    const MARKUP_CANDIDATES = [
+      'item_ids/price_markup',
+      'item_ids/price_discount',
+      'item_ids/percent_price',
+    ];
+    const iMarkup = (() => {
+      for (const c of MARKUP_CANDIDATES) {
+        const idx = headers.findIndex(h => h.toLowerCase() === c.toLowerCase());
+        if (idx >= 0) return idx;
+      }
+      return -1;
+    })();
+
+    // Also try to find a computed/price column as fallback
+    const iPriceComputed = headers.findIndex(h =>
+      h.toLowerCase().includes('precio_calculado') ||
+      h.toLowerCase().includes('computed_price') ||
+      h.toLowerCase() === 'item_ids/price'
+    );
+
+    // Also find the base (cost/sale_price/etc) column
+    const iBase = headers.findIndex(h => h.toLowerCase() === 'item_ids/base');
+    const iComputePrice = headers.findIndex(h => h.toLowerCase() === 'item_ids/compute_price');
 
     return rows.slice(1).flatMap(row => {
       const rawName = String(row[iName] ?? '').trim();
@@ -168,8 +313,21 @@ export function parseOdooRows(rows: unknown[][]): OdooMLRule[] {
       const templateId    = iExtId >= 0 ? extractOdooTemplateId(String(row[iExtId] ?? '')) : undefined;
       const markupRaw     = iMarkup >= 0 ? parseNum(row[iMarkup]) : 0;
 
-      // In this export, markup is already a clean integer percentage (105 = 105% over cost)
-      const markup = markupRaw;
+      // Detect compute_price type so we interpret the value correctly
+      const computeType   = iComputePrice >= 0 ? String(row[iComputePrice] ?? '').toLowerCase() : '';
+      const basedOn       = iBase >= 0 ? String(row[iBase] ?? '').toLowerCase() : '';
+
+      let markup = markupRaw;
+
+      // For formula-type rules: price_discount stores "Margen de ganancia %" directly (e.g. 170 = 170%)
+      // For percentage-type rules: price_discount is a discount % (negative = surcharge)
+      if (computeType === 'percentage' && markup < 0) {
+        markup = Math.abs(markup); // negative discount = markup
+      }
+
+      // If markup = 0 and we have a computed price, try to derive markup from it
+      // (fallback: some exports only have the final price)
+      const computedPrice = iPriceComputed >= 0 ? parseNum(row[iPriceComputed]) : 0;
 
       const rawObj: Record<string, unknown> = {};
       headers.forEach((h, i) => { rawObj[h] = row[i]; });
@@ -179,6 +337,7 @@ export function parseOdooRows(rows: unknown[][]): OdooMLRule[] {
         sku,
         name,
         markup,
+        computedPrice: computedPrice || undefined,
         raw: rawObj,
       }] as OdooMLRule[];
     });
@@ -576,7 +735,11 @@ export function matchAndBuild(
     if (rule.sku) {
       const exact = mlPubs.filter(m => m.sku && skuMatch(m.sku, rule.sku!));
       if (exact.length === 1)    { mlPub = exact[0]; matchMethod = 'sku'; confidence = 97; }
-      else if (exact.length > 1) { mlPub = exact[0]; matchMethod = 'sku'; confidence = 90; isDuplicate = true; }
+      else if (exact.length > 1) {
+        mlPub = exact[0]; matchMethod = 'sku'; confidence = 90; isDuplicate = true;
+        // Mark ALL duplicate pubs as matched so they don't appear as "Sin regla Odoo"
+        exact.forEach(m => matchedMLIds.add(m.mlItemId));
+      }
     }
     // Priority 2: Barcode exact
     if (!mlPub && rule.barcode) {
@@ -589,17 +752,46 @@ export function matchAndBuild(
       const found = mlPubs.find(m => m.sku?.includes(idStr) || m.title?.includes(idStr));
       if (found) { mlPub = found; matchMethod = 'id'; confidence = 85; }
     }
-    // Priority 4: Name similarity (threshold 0.40; below 80% → match_dudoso)
+    // Priority 3b: Odoo SKU core appears inside ML SKU or ML title
+    // Catches: V-101001 (core="101001") ↔ ML title "Acople Rápido Espigado 1 1/2 - Vulcano 101001"
+    //          1257 (core="1257")        ↔ ML sku "00001257"
+    if (!mlPub && rule.sku) {
+      const core = skuCore(rule.sku);
+      if (core.length >= 4) {
+        const found = mlPubs.find(m => {
+          const mSkuCore = skuCore(m.sku ?? '');
+          return mSkuCore === core ||
+                 (mSkuCore.length >= 4 && (mSkuCore.includes(core) || core.includes(mSkuCore))) ||
+                 normalizeStr(m.title ?? '').replace(/\s/g,'').includes(core);
+        });
+        if (found) { mlPub = found; matchMethod = 'sku_core'; confidence = 78; }
+      }
+    }
+    // Priority 4: Name similarity
+    // ⚠ Only searches ML pubs NOT yet claimed by a higher-priority match on a previous Odoo rule.
+    //   This prevents Odoo rule B from stealing an ML pub already matched to rule A via SKU.
+    //   Threshold 0.30 (Jaccard): catches long ML titles where extra SEO words dilute the ratio.
+    //   Recall boost: if all words of the shorter name appear in the longer title → always matches.
     if (!mlPub) {
-      const scored = mlPubs
-        .map(m => ({ m, score: nameSimilarity(rule.name, m.title) }))
-        .filter(x => x.score >= 0.40)
+      const available = mlPubs.filter(m => !matchedMLIds.has(m.mlItemId));
+      const scored = available
+        .map(m => {
+          const j = nameSimilarity(rule.name, m.title);
+          // Recall: fraction of shorter name's words found in longer title
+          const wa = new Set(normalizeStr(rule.name).split(' ').filter(w => w.length >= 3));
+          const wb = new Set(normalizeStr(m.title).split(' ').filter(w => w.length >= 3));
+          const inter = [...wa].filter(w => wb.has(w)).length;
+          const recall = Math.min(wa.size, wb.size) > 0
+            ? inter / Math.min(wa.size, wb.size) : 0;
+          return { m, score: Math.max(j, recall >= 0.80 ? j + 0.05 : 0), jaccard: j };
+        })
+        .filter(x => x.jaccard >= 0.30)
         .sort((a, b) => b.score - a.score);
       if (scored.length > 0) {
         mlPub = scored[0].m;
         matchMethod = 'nombre';
-        confidence = Math.round(scored[0].score * 100);
-        if (scored.length > 1 && scored[0].score - scored[1].score < 0.10) isDuplicate = true;
+        confidence = Math.round(scored[0].jaccard * 100);
+        if (scored.length > 1 && scored[0].jaccard - scored[1].jaccard < 0.10) isDuplicate = true;
       }
     }
 
@@ -617,12 +809,17 @@ export function matchAndBuild(
 
     // Calculate profitability — merge actual ML commission if available
     const mergedParams = { ...globalParams };
-    if (mlPub?.freeShipping) mergedParams.shippingCost = estimateShipping();
-    // Use real commission % from ML Seller Center export (stored in raw)
+    // Per-product param overrides (real values from ML Seller Center export)
+    const productParamsOverride: Partial<MLProductParams> = {};
+    if (mlPub?.freeShipping) {
+      mergedParams.shippingCost = estimateShipping();
+      productParamsOverride.shippingCost = estimateShipping();
+    }
+    // Use real commission % and fixed fee from ML Seller Center export (stored in raw)
     const mlCommPct   = mlPub?.raw?._commissionPct as number | undefined;
     const mlCommFixed = mlPub?.raw?._commissionFixed as number | undefined;
-    if (mlCommPct && mlCommPct > 0)   mergedParams.commission = mlCommPct;
-    if (mlCommFixed && mlCommFixed > 0) mergedParams.fixedFee = mlCommFixed;
+    if (mlCommPct   && mlCommPct   > 0) { mergedParams.commission = mlCommPct;   productParamsOverride.commission = mlCommPct; }
+    if (mlCommFixed && mlCommFixed > 0) { mergedParams.fixedFee   = mlCommFixed; productParamsOverride.fixedFee   = mlCommFixed; }
 
     const calc     = mlPub?.price ? calcProfitability(mlPub.price, cost, mergedParams) ?? undefined : undefined;
     const calcIdeal = cost > 0 ? (() => {
@@ -661,6 +858,8 @@ export function matchAndBuild(
       syncStatus,
       matchConfidence: confidence,
       matchMethod: matchMethod || undefined,
+      // Persist real ML fees per-product so consultant uses them (not just global defaults)
+      params: Object.keys(productParamsOverride).length > 0 ? productParamsOverride : undefined,
       calc,
       calcIdeal,
       alerts: [],
@@ -920,22 +1119,50 @@ export function generateConsultantReport(
     publicationProblem = 'Sin datos suficientes de visitas/ventas para evaluar la publicación.';
   }
 
-  // 4. Condición
+  // 4. Condición — foco en las condiciones que aumentan ventas, no en precio
   let conditionAdvice = '';
-  if (!product.mlFreeShipping && !product.mlHasInstallments) {
-    conditionAdvice = 'Sin envío gratis y sin cuotas. En un mercado competitivo, estas dos condiciones son críticas para la conversión. Calculá si el margen soporta agregarlas.';
+  const missingConditions: string[] = [];
+  if (!product.mlFreeShipping) missingConditions.push('envío gratis');
+  if (!product.mlHasInstallments) missingConditions.push('cuotas sin interés');
+  if (missingConditions.length === 2) {
+    conditionAdvice = `Sin envío gratis ni cuotas. Estas dos condiciones son las que más impactan la conversión en ML. Antes de cambiar el precio, activá ambas y medí el resultado.`;
   } else if (!product.mlFreeShipping) {
-    conditionAdvice = 'Tenés cuotas pero sin envío gratis. El envío gratis suele tener mayor impacto en conversión. Evaluá si podés absorberlo.';
+    conditionAdvice = `Tenés cuotas pero sin envío gratis. El envío gratis tiene el mayor impacto individual en la visibilidad y conversión de ML. Evaluá si el margen lo soporta.`;
   } else if (!product.mlHasInstallments) {
-    conditionAdvice = 'Tenés envío gratis pero sin cuotas. Agregar 3 o 6 cuotas sin interés puede mejorar la conversión sin impacto enorme en el margen.';
+    conditionAdvice = `Tenés envío gratis pero sin cuotas. Agregar 3 o 6 cuotas sin interés puede aumentar el ticket de compra. El costo es bajo si el margen lo permite.`;
   } else {
-    conditionAdvice = 'Tenés envío gratis + cuotas. Las condiciones son competitivas. Enfocate en precio y calidad de publicación.';
+    conditionAdvice = `Envío gratis + cuotas: condiciones fuertes. El foco ahora es la calidad de la publicación: foto principal clara, título con palabras clave y descripción completa.`;
   }
 
   // 5-7. Precio y markup
-  const idealPrice  = cost > 0 ? calcIdealPrice(cost, p.idealMargin, p) : 0;
-  const idealMarkup = idealPrice > 0 && cost > 0 ? (idealPrice / 1.21 / cost - 1) * 100 : 0;
-  const idealCalc   = idealPrice > 0 ? calcProfitability(idealPrice, cost, p) : null;
+  const idealPrice     = cost > 0 ? calcIdealPrice(cost, p.idealMargin, p) : 0;
+  const minViablePrice = cost > 0 ? calcIdealPrice(cost, 0, p) : 0; // break-even price
+
+  // Precio recomendado:
+  // - Si pierde o bajo margen → subir al precio que logra el margen ideal (o al mercado si alcanza)
+  // - Si es rentable → MANTENER el precio actual (la palanca son las condiciones, no el precio)
+  let recommendedPriceFinal = idealPrice;
+  if (calc?.status === 'pierde' || calc?.status === 'bajo_margen') {
+    if (marketAvgPrice && marketAvgPrice > 0) {
+      if (marketAvgPrice >= idealPrice) {
+        recommendedPriceFinal = idealPrice;       // mercado permite margen ideal
+      } else if (marketAvgPrice >= minViablePrice) {
+        recommendedPriceFinal = marketAvgPrice;   // al menos break-even
+      } else {
+        recommendedPriceFinal = idealPrice;       // mostrar el precio necesario aunque esté por encima del mercado
+      }
+    } else {
+      recommendedPriceFinal = idealPrice;
+    }
+  } else if (mlPrice > 0) {
+    // Rentable → mantener precio actual; el trabajo es mejorar condiciones y publicación
+    recommendedPriceFinal = mlPrice;
+  }
+  recommendedPriceFinal = roundToN(recommendedPriceFinal, p.roundTo);
+
+  const idealMarkup     = recommendedPriceFinal > 0 && cost > 0 ? (recommendedPriceFinal / 1.21 / cost - 1) * 100 : 0;
+  const idealCalc       = idealPrice > 0 ? calcProfitability(idealPrice, cost, p) : null;
+  const recommendedCalc = recommendedPriceFinal > 0 ? calcProfitability(recommendedPriceFinal, cost, p) : idealCalc;
 
   // 8. Riesgo
   let risk = '';
@@ -944,7 +1171,11 @@ export function generateConsultantReport(
     risk = 'Alto: sin costo no hay control de rentabilidad.';
     riskLevel = 'alto';
   } else if (calc?.status === 'pierde') {
-    risk = 'Muy alto: cada venta genera pérdida. Suspendé o corregí el precio urgente.';
+    if (marketAvgPrice && minViablePrice > marketAvgPrice) {
+      risk = `Muy alto: el mercado (${ars(marketAvgPrice)}) está por debajo de tu punto de equilibrio (${ars(minViablePrice)}). Evaluá negociar el costo o pausar.`;
+    } else {
+      risk = 'Muy alto: cada venta genera pérdida. Subí el precio urgente.';
+    }
     riskLevel = 'alto';
   } else if (idealPrice > 0 && marketAvgPrice && idealPrice > marketAvgPrice * 1.2) {
     risk = 'Medio: el precio rentable está muy por encima del mercado. Puede ser difícil vender.';
@@ -957,26 +1188,50 @@ export function generateConsultantReport(
     riskLevel = 'bajo';
   }
 
-  // 9. Prueba 7 días
+  // 9. Acción principal — condiciones primero, precio solo cuando es urgente
   let trialAction = '';
   if (!mlPrice || !product.mlItemId) {
-    trialAction = 'Creá la publicación en MercadoLibre con envío gratis y el precio ideal calculado arriba. Medí visitas y conversión en 7 días.';
-  } else if (calc?.status === 'pierde' || calc?.status === 'bajo_margen') {
-    trialAction = `Subí el precio a ${ars(idealPrice)} en ML y actualizá el markup en Odoo a ${idealMarkup.toFixed(1)}%. Verificá en 7 días si las ventas se mantienen.`;
+    const newMkp = recommendedPriceFinal > 0 && cost > 0 ? (recommendedPriceFinal / 1.21 / cost - 1) * 100 : 0;
+    trialAction = `Creá la publicación con precio ${ars(recommendedPriceFinal)} (markup ${newMkp.toFixed(1)}%), envío gratis y 6 cuotas sin interés si el margen lo permite.`;
+  } else if (calc?.status === 'pierde') {
+    if (marketAvgPrice && minViablePrice > marketAvgPrice) {
+      trialAction = `El mercado (${ars(marketAvgPrice)}) está por debajo de tu punto de equilibrio (${ars(minViablePrice)}). Negociá mejor costo con el proveedor o pausá el producto.`;
+    } else {
+      trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup.toFixed(1)}%) para dejar de perder dinero. Mantené las demás condiciones.`;
+    }
+  } else if (calc?.status === 'bajo_margen') {
+    trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup.toFixed(1)}%) → margen estimado ${recommendedCalc?.netMargin.toFixed(1) ?? '—'}%. El precio actual no cubre los costos adecuadamente.`;
+  } else if (missingConditions.length > 0) {
+    // Rentable pero le faltan condiciones
+    trialAction = `Precio rentable (${calc?.netMargin.toFixed(1)}% margen). La clave para vender más es ${missingConditions.join(' y ')}. Activalos y medí el impacto en visitas en 7 días.`;
   } else {
-    trialAction = `Agregá ${!product.mlFreeShipping ? 'envío gratis' : '6 cuotas sin interés'} y observá el impacto en visitas y conversión durante 7 días.`;
+    // Todo OK → publicación
+    trialAction = `Condiciones y precio bien configurados. Mejorá la foto principal (fondo blanco, producto completo), el título (marca + modelo + medida) y la descripción para subir la conversión.`;
   }
 
   // 10. Qué medir
-  const whatToMeasure = 'Visitas, conversión (ventas/visitas), unidades vendidas, margen neto real, posición en el ranking de búsqueda para las palabras clave del producto.';
+  const whatToMeasure = 'Visitas diarias, tasa de conversión (ventas/visitas), posición en búsqueda para las palabras clave del producto, y margen neto real por unidad vendida.';
 
-  // Strategy
+  // Strategy — conditions-first cuando es rentable; precio solo cuando pierde dinero
+  const tooExpensiveForMarket = !!(marketAvgPrice && idealPrice > marketAvgPrice * 1.3);
   let strategy: MLConsultantReport['strategy'] = 'mantener';
   let strategyLabel = 'Mantener como está';
-  if (!cost || calc?.status === 'pierde') { strategy = 'bajar_markup'; strategyLabel = 'Ajustar precio urgente'; }
-  else if (calc?.status === 'bajo_margen') { strategy = 'subir_markup'; strategyLabel = 'Subir precio / markup'; }
-  else if (!product.mlFreeShipping) { strategy = 'activar_envio_gratis'; strategyLabel = 'Activar envío gratis'; }
-  else if (!product.mlHasInstallments) { strategy = 'activar_cuotas'; strategyLabel = 'Agregar cuotas'; }
+  if (!cost) {
+    strategy = 'pausar'; strategyLabel = 'Sin costo — completar primero';
+  } else if (calc?.status === 'pierde' && tooExpensiveForMarket) {
+    strategy = 'pausar'; strategyLabel = 'Evaluar pausar — no da margen';
+  } else if (calc?.status === 'pierde') {
+    strategy = 'subir_markup'; strategyLabel = 'Subir precio urgente ↑';
+  } else if (calc?.status === 'bajo_margen') {
+    strategy = 'subir_markup'; strategyLabel = 'Subir precio / markup';
+  } else if (!product.mlFreeShipping) {
+    // Rentable → conditions-first, no price comparison
+    strategy = 'activar_envio_gratis'; strategyLabel = 'Activar envío gratis';
+  } else if (!product.mlHasInstallments) {
+    strategy = 'activar_cuotas'; strategyLabel = 'Agregar cuotas';
+  } else {
+    strategy = 'mejorar_publicacion'; strategyLabel = 'Mejorar publicación';
+  }
 
   // Overall score 0-100
   let score = 50;
@@ -996,9 +1251,9 @@ export function generateConsultantReport(
     marketSituation,
     publicationProblem,
     conditionAdvice,
-    recommendedPrice: idealPrice,
+    recommendedPrice: recommendedPriceFinal,
     recommendedMarkup: idealMarkup,
-    estimatedMargin: idealCalc?.netMargin ?? 0,
+    estimatedMargin: recommendedCalc?.netMargin ?? idealCalc?.netMargin ?? 0,
     risk,
     riskLevel,
     trialAction,
