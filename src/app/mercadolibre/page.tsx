@@ -11,7 +11,7 @@ import { loadGeminiKey, saveGeminiKey, clearGeminiKey } from '@/lib/gemini-key';
 import {
   parseOdooRows, parseMLRows, matchAndBuild, calcProfitability,
   calcIdealPrice, generateScenarios, generateConsultantReport, generateAlerts,
-  buildOdooExportRows, parseNum, inspectOdooHeaders,
+  buildOdooExportRows, parseNum, inspectOdooHeaders, getOrphanMLPubs,
 } from '@/lib/ml-lab-engine';
 import type { MLLabProduct, MLProductParams, MLSyncStatus, ScenarioKey } from '@/lib/ml-lab-types';
 import { DEFAULT_ML_PARAMS } from '@/lib/ml-lab-types';
@@ -164,31 +164,48 @@ function DropZone({
 // IMPORT TAB
 // ─────────────────────────────────────────────────────────────────────────────
 
+const ML_ODOO_IDS_KEY = 'acqua_ml_template_ids';
+
 function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
   const [odooRows,    setOdooRows]    = useState<unknown[][]>([]);
   const [mlRows,      setMlRows]      = useState<unknown[][]>([]);
   const [odooName,    setOdooName]    = useState('');
   const [mlName,      setMlName]      = useState('');
   const [processing,  setProcessing]  = useState(false);
-  const [result,      setResult]      = useState<{ matched: number; total: number; orphans: number } | null>(null);
+  const [result,      setResult]      = useState<{
+    odooTotal: number; withCost: number; withML: number; sinPublicacion: number; orphans: number;
+  } | null>(null);
 
   const hasOdoo = odooRows.length > 1;
   const hasML   = mlRows.length > 1;
-  const canRun  = hasOdoo || hasML;
+  // Odoo pricelist is REQUIRED; ML file is OPTIONAL enrichment
+  const canRun  = hasOdoo;
 
   const runMatch = useCallback(() => {
     if (!canRun) return;
     setProcessing(true);
     try {
-      const odooRules = hasOdoo ? parseOdooRows(odooRows) : [];
-      const mlPubs    = hasML   ? parseMLRows(mlRows)     : [];
-      const products  = matchAndBuild(odooRules, mlPubs, systemProducts, store.globalParams);
+      const odooRules = parseOdooRows(odooRows);
+      const mlPubs    = hasML ? parseMLRows(mlRows) : [];
 
-      const matched  = products.filter(p => p.mlItemId && p.odooId).length;
-      const orphans  = products.filter(p => p.syncStatus === 'sin_regla_odoo').length;
+      // Build products — Odoo pricelist is source of truth, orphan ML pubs excluded
+      const products = matchAndBuild(odooRules, mlPubs, systemProducts, store.globalParams);
+
+      // Save Odoo template IDs to localStorage → "En MercadoLibre" badge in Productos
+      const templateIds = odooRules
+        .map(r => r.productTemplateId)
+        .filter((id): id is number => id !== undefined && id > 0);
+      try { localStorage.setItem(ML_ODOO_IDS_KEY, JSON.stringify(templateIds)); } catch { /* quota */ }
+
+      // Count orphan ML pubs (ML publications with no Odoo rule — info only)
+      const orphanPubs = hasML ? getOrphanMLPubs(odooRules, mlPubs) : [];
+
+      const withCost       = products.filter(p => p.cost > 0).length;
+      const withML         = products.filter(p => !!p.mlItemId).length;
+      const sinPublicacion = products.filter(p => p.syncStatus === 'sin_publicacion' || p.syncStatus === 'sin_costo').length;
 
       store.setProducts(products, { odooFileName: odooName, mlFileName: mlName });
-      setResult({ matched, total: products.length, orphans });
+      setResult({ odooTotal: products.length, withCost, withML, sinPublicacion, orphans: orphanPubs.length });
     } catch (e) {
       console.error('Match error:', e);
     } finally {
@@ -206,9 +223,9 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
             <Zap className="w-4 h-4 text-gray-900" />
           </div>
           <div>
-            <p className="text-[13px] font-bold text-gray-900 mb-1">Carga inicial — Espejo Maestro</p>
+            <p className="text-[13px] font-bold text-gray-900 mb-1">Espejo Maestro — Odoo como base</p>
             <p className="text-[12px] text-gray-600 leading-relaxed">
-              Subí el archivo de <strong>reglas de precio Odoo</strong> (lista MercadoLibre) y el archivo de <strong>publicaciones exportado desde ML</strong>. El sistema los cruza automáticamente con el inventario interno.
+              La <strong>lista de precios Odoo</strong> es la fuente de verdad: define qué productos están en MercadoLibre y con qué markup. El archivo de <strong>ML Seller Center</strong> es opcional — solo enriquece con datos de publicación (precio real, stock ML, visitas, comisión).
             </p>
           </div>
         </div>
@@ -279,15 +296,18 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
         })()}
       </div>
 
-      {/* Step 2 */}
+      {/* Step 2 — OPTIONAL */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <span className="w-6 h-6 rounded-full bg-[#0784F2] text-white text-[11px] font-black flex items-center justify-center shrink-0">2</span>
-          <p className="text-[13px] font-bold text-gray-900">Publicaciones activas de MercadoLibre</p>
+          <div className="flex items-center gap-2">
+            <p className="text-[13px] font-bold text-gray-900">Publicaciones activas de MercadoLibre</p>
+            <span className="px-2 py-0.5 rounded-full bg-[#0784F2]/10 text-[#0784F2] text-[10px] font-bold uppercase tracking-wide">Opcional</span>
+          </div>
         </div>
         <DropZone
-          label="Exportar desde ML Seller Center"
-          hint="Columnas esperadas: ID ítem, Título, Precio, Estado, Stock, Vendidos, Visitas…"
+          label="Exportar desde ML Seller Center (opcional)"
+          hint="Enriquece con ID de publicación, precio real, stock ML, visitas y comisión"
           fileName={mlName}
           onFile={(rows, name) => { setMlRows(rows); setMlName(name); setResult(null); }}
         />
@@ -314,6 +334,11 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
       </div>
 
       {/* Run button */}
+      {!hasOdoo && (
+        <p className="text-[11px] text-center text-gray-400">
+          ↑ Requerido: subí el archivo de <strong>lista de precios Odoo</strong> para continuar
+        </p>
+      )}
       <button
         onClick={runMatch}
         disabled={!canRun || processing}
@@ -324,31 +349,45 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
             : 'bg-gray-200 text-gray-400 cursor-not-allowed',
         )}
       >
-        {processing ? <><RefreshCw className="w-5 h-5 animate-spin" /> Cruzando datos…</> : <><Zap className="w-5 h-5" /> Procesar y crear Espejo Maestro</>}
+        {processing
+          ? <><RefreshCw className="w-5 h-5 animate-spin" /> Generando espejo…</>
+          : <><Zap className="w-5 h-5" /> {hasML ? 'Procesar Odoo + ML' : 'Procesar Lista Odoo'}</>}
       </button>
 
       {/* Result */}
       {result && (
-        <div className="bg-[#16A34A]/10 border border-[#16A34A]/20 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-3">
+        <div className="bg-[#16A34A]/10 border border-[#16A34A]/20 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-[#16A34A]" />
             <p className="text-[14px] font-bold text-[#16A34A]">Espejo maestro generado</p>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             <div className="text-center bg-white rounded-xl p-3">
-              <div className="text-2xl font-black text-gray-900">{result.total}</div>
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Productos totales</div>
+              <div className="text-2xl font-black text-gray-900">{result.odooTotal}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide">En lista Odoo</div>
             </div>
             <div className="text-center bg-white rounded-xl p-3">
-              <div className="text-2xl font-black text-[#16A34A]">{result.matched}</div>
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Cruzados</div>
+              <div className="text-2xl font-black text-[#16A34A]">{result.withCost}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Con costo</div>
             </div>
             <div className="text-center bg-white rounded-xl p-3">
-              <div className="text-2xl font-black text-[#F97316]">{result.orphans}</div>
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Sin regla Odoo</div>
+              <div className="text-2xl font-black text-[#0784F2]">{result.withML}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Vinculados ML</div>
+            </div>
+            <div className="text-center bg-white rounded-xl p-3">
+              <div className="text-2xl font-black text-[#F97316]">{result.sinPublicacion}</div>
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide">Sin publicación</div>
             </div>
           </div>
-          <p className="text-[11px] text-[#16A34A] mt-3 text-center">
+          {result.orphans > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-[#714B67]/10 rounded-xl">
+              <Info className="w-3.5 h-3.5 text-[#714B67] shrink-0" />
+              <p className="text-[11px] text-[#714B67]">
+                <strong>{result.orphans}</strong> publicaciones en ML sin regla Odoo — no se importan. Para verlas, actualizá la lista de precios en Odoo.
+              </p>
+            </div>
+          )}
+          <p className="text-[11px] text-[#16A34A] text-center">
             Andá a la pestaña <strong>Tabla</strong> para ver todos los productos.
           </p>
         </div>
@@ -900,7 +939,7 @@ function DashboardTab({
                   { label: '🔴 Pierden plata', val: stats.pierde,      f: 'pierde'      as DashFilter, col: stats.pierde > 0      ? 'text-[#EF4444]' : 'text-gray-400' },
                   { label: '🟡 Bajo margen',   val: stats.bajoMargen,  f: 'bajo_margen' as DashFilter, col: stats.bajoMargen > 0  ? 'text-[#F97316]' : 'text-gray-400' },
                   { label: '🟢 Rentables',     val: stats.rentables,   f: 'rentable'    as DashFilter, col: 'text-[#16A34A]' },
-                  { label: '⚪ Sin datos',     val: stats.sinCosto + products.filter(p=>p.syncStatus==='sin_regla_odoo').length, f: 'sin_datos' as DashFilter, col: 'text-gray-400' },
+                  { label: '⚪ Sin costo',     val: stats.sinCosto, f: 'sin_datos' as DashFilter, col: 'text-gray-400' },
                 ].map(c => (
                   <button
                     key={c.label}

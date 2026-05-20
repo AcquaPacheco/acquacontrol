@@ -701,11 +701,66 @@ interface SystemProduct {
   odooId: number | null;
 }
 
+/**
+ * Returns ML publications that have NO matching Odoo pricelist rule.
+ * Use this to show a "publicaciones sin vincular" info section in the UI.
+ */
+export function getOrphanMLPubs(
+  odooRules: OdooMLRule[],
+  mlPubs: MLPublication[],
+): MLPublication[] {
+  if (mlPubs.length === 0) return [];
+  // Run a lightweight version of the match to get matchedMLIds
+  const matchedIds = new Set<string>();
+  for (const rule of odooRules) {
+    // P1 SKU
+    if (rule.sku) {
+      const exact = mlPubs.filter(m => m.sku && skuMatch(m.sku, rule.sku!));
+      exact.forEach(m => matchedIds.add(m.mlItemId));
+      if (exact.length > 0) continue;
+    }
+    // P2 Barcode
+    if (rule.barcode) {
+      const found = mlPubs.find(m => !matchedIds.has(m.mlItemId) && skuMatch(m.sku ?? '', rule.barcode!));
+      if (found) { matchedIds.add(found.mlItemId); continue; }
+    }
+    // P3 Template ID
+    if (rule.productTemplateId) {
+      const idStr = String(rule.productTemplateId);
+      const found = mlPubs.find(m => !matchedIds.has(m.mlItemId) && (m.sku?.includes(idStr) || m.title?.includes(idStr)));
+      if (found) { matchedIds.add(found.mlItemId); continue; }
+    }
+    // P3b SKU core
+    if (rule.sku) {
+      const core = skuCore(rule.sku);
+      if (core.length >= 4) {
+        const found = mlPubs.find(m => {
+          if (matchedIds.has(m.mlItemId)) return false;
+          const mSkuCore = skuCore(m.sku ?? '');
+          return mSkuCore === core ||
+                 (mSkuCore.length >= 4 && (mSkuCore.includes(core) || core.includes(mSkuCore))) ||
+                 normalizeStr(m.title ?? '').replace(/\s/g,'').includes(core);
+        });
+        if (found) { matchedIds.add(found.mlItemId); continue; }
+      }
+    }
+    // P4 Name similarity
+    const available = mlPubs.filter(m => !matchedIds.has(m.mlItemId));
+    const best = available
+      .map(m => ({ m, j: nameSimilarity(rule.name, m.title) }))
+      .filter(x => x.j >= 0.30)
+      .sort((a, b) => b.j - a.j)[0];
+    if (best) matchedIds.add(best.m.mlItemId);
+  }
+  return mlPubs.filter(m => !matchedIds.has(m.mlItemId));
+}
+
 export function matchAndBuild(
   odooRules: OdooMLRule[],
   mlPubs: MLPublication[],
   systemProducts: SystemProduct[],
   globalParams: MLProductParams,
+  options?: { includeOrphans?: boolean },
 ): MLLabProduct[] {
   const now = new Date().toISOString();
   const products: MLLabProduct[] = [];
@@ -873,6 +928,10 @@ export function matchAndBuild(
   }
 
   // ── Unmatched ML publications (no Odoo rule) ──────────────────────
+  // By default excluded — Odoo pricelist is the source of truth.
+  // Pass options.includeOrphans = true to include them for inspection.
+  if (!options?.includeOrphans) return products;
+
   for (const mlPub of mlPubs) {
     if (matchedMLIds.has(mlPub.mlItemId)) continue;
 
