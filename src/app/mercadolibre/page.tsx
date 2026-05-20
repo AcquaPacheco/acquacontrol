@@ -161,6 +161,224 @@ function DropZone({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MANUAL LINK MODAL — vincular sin_publicacion ↔ orphan ML pub
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ManualLinkModal({
+  store,
+  onClose,
+}: {
+  store: ReturnType<typeof useMLLabStore>;
+  onClose: () => void;
+}) {
+  const sinPub   = store.products.filter(p => p.syncStatus === 'sin_publicacion');
+  const orphans  = store.orphanPubs ?? [];
+  const [leftId,  setLeftId]  = useState<string | null>(null);
+  const [rightId, setRightId] = useState<string | null>(null);
+  const [done,    setDone]    = useState<string[]>([]);
+  const [search,  setSearch]  = useState('');
+
+  const filteredOrphans = orphans.filter(o =>
+    !search || o.title.toLowerCase().includes(search.toLowerCase()) ||
+    (o.sku ?? '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const canLink = !!leftId && !!rightId;
+
+  function handleLink() {
+    if (!leftId || !rightId) return;
+    const product = sinPub.find(p => p.id === leftId);
+    const pub     = orphans.find(o => o.mlItemId === rightId);
+    if (!product || !pub) return;
+
+    const params  = { ...DEFAULT_ML_PARAMS, ...store.globalParams, ...(product.params ?? {}) };
+    const newCalc = calcProfitability(pub.price, product.cost, params);
+    const newAlerts = generateAlerts(
+      { ...product, mlPrice: pub.price, mlStatus: pub.status, mlStock: pub.stock },
+      params
+    );
+
+    store.updateProduct(product.id, {
+      mlItemId:          pub.mlItemId,
+      mlTitle:           pub.title,
+      mlPrice:           pub.price,
+      mlStatus:          pub.status,
+      mlStock:           pub.stock,
+      mlSold:            pub.sold,
+      mlVisits:          pub.visits,
+      mlFreeShipping:    pub.freeShipping,
+      mlHasInstallments: pub.hasInstallments,
+      mlIsFull:          pub.isFull,
+      mlListingType:     pub.listingType,
+      mlPermalink:       pub.permalink,
+      mlCondition:       pub.condition,
+      mlThumbnail:       pub.thumbnail,
+      syncStatus:        'match_dudoso',
+      matchMethod:       'manual',
+      matchConfidence:   100,
+      calc:              newCalc ?? undefined,
+      alerts:            newAlerts,
+    });
+
+    setDone(prev => [...prev, leftId]);
+    setLeftId(null);
+    setRightId(null);
+  }
+
+  const remaining = sinPub.filter(p => !done.includes(p.id));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-[#07111F] rounded-t-2xl">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#FFE600] flex items-center justify-center shrink-0">
+              <Layers className="w-4 h-4 text-gray-900" />
+            </div>
+            <div>
+              <p className="text-[13px] font-bold text-white">Vincular publicaciones manualmente</p>
+              <p className="text-[10px] text-white/50">Seleccioná un producto Odoo (izq.) y una publicación ML (der.) → Vincular</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/60 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {remaining.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8">
+            <CheckCircle2 className="w-12 h-12 text-[#16A34A]" />
+            <p className="text-[14px] font-bold text-gray-900">¡Todos vinculados!</p>
+            <p className="text-[12px] text-gray-400">Los productos ahora aparecen como <strong>Match dudoso</strong> en la Tabla.</p>
+            <button onClick={onClose} className="mt-2 px-4 py-2 bg-[#07111F] text-[#FFE600] rounded-xl text-[13px] font-bold">Cerrar</button>
+          </div>
+        ) : (
+          <div className="flex flex-1 min-h-0">
+            {/* LEFT — sin publicación */}
+            <div className="w-[42%] border-r border-gray-100 flex flex-col">
+              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
+                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Sin publicación en ML</p>
+                <p className="text-[10px] text-gray-400">{remaining.length} productos</p>
+              </div>
+              <div className="flex-1 overflow-y-auto py-2">
+                {remaining.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setLeftId(prev => prev === p.id ? null : p.id)}
+                    className={cn(
+                      'w-full text-left px-4 py-3 flex items-start gap-2.5 transition-colors border-l-2',
+                      leftId === p.id
+                        ? 'bg-[#0784F2]/8 border-[#0784F2]'
+                        : 'border-transparent hover:bg-gray-50',
+                    )}
+                  >
+                    <div className={cn(
+                      'w-4 h-4 rounded-full border-2 shrink-0 mt-0.5 transition-colors',
+                      leftId === p.id ? 'border-[#0784F2] bg-[#0784F2]' : 'border-gray-300',
+                    )} />
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-semibold text-gray-900 leading-tight line-clamp-2">{p.name}</p>
+                      {p.sku && <p className="text-[10px] text-gray-400 mt-0.5 font-mono">{p.sku}</p>}
+                      {p.cost > 0 && <p className="text-[10px] text-[#16A34A] font-bold mt-0.5">{ars(p.cost)} costo</p>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* RIGHT — orphan ML pubs */}
+            <div className="flex-1 flex flex-col min-w-0">
+              <div className="px-4 py-3 border-b border-gray-100 bg-gray-50 space-y-2">
+                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Publicaciones ML sin regla Odoo</p>
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                  <input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Buscar..."
+                    className="w-full pl-7 pr-3 py-1.5 text-[11px] border border-gray-200 rounded-lg focus:outline-none focus:border-[#0784F2]"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto py-2">
+                {filteredOrphans.length === 0 && (
+                  <p className="text-[12px] text-gray-400 text-center py-8">Sin resultados</p>
+                )}
+                {filteredOrphans.map(o => (
+                  <button
+                    key={o.mlItemId}
+                    onClick={() => setRightId(prev => prev === o.mlItemId ? null : o.mlItemId)}
+                    className={cn(
+                      'w-full text-left px-4 py-3 flex items-start gap-2.5 transition-colors border-l-2',
+                      rightId === o.mlItemId
+                        ? 'bg-[#FFE600]/10 border-[#FFE600]'
+                        : 'border-transparent hover:bg-gray-50',
+                    )}
+                  >
+                    <div className={cn(
+                      'w-4 h-4 rounded-full border-2 shrink-0 mt-0.5 transition-colors',
+                      rightId === o.mlItemId ? 'border-[#F59E0B] bg-[#F59E0B]' : 'border-gray-300',
+                    )} />
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-semibold text-gray-900 leading-tight line-clamp-2">{o.title}</p>
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="text-[10px] font-mono text-gray-400">{o.mlItemId}</span>
+                        {o.sku && <span className="text-[10px] font-mono text-gray-500">SKU: {o.sku}</span>}
+                        <span className="text-[10px] font-bold text-[#07111F]">{ars(o.price)}</span>
+                        <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full font-bold',
+                          o.status === 'active' ? 'bg-[#16A34A]/10 text-[#16A34A]' : 'bg-gray-100 text-gray-500'
+                        )}>{o.status}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        {remaining.length > 0 && (
+          <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50 rounded-b-2xl">
+            <div className="text-[11px] text-gray-500">
+              {leftId && rightId
+                ? <span className="text-[#16A34A] font-semibold">✓ Listo para vincular</span>
+                : leftId
+                ? 'Ahora seleccioná la publicación ML →'
+                : rightId
+                ? '← Ahora seleccioná el producto Odoo'
+                : 'Seleccioná un producto y una publicación'}
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={onClose} className="px-3 py-2 text-[12px] text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                Cerrar
+              </button>
+              <button
+                onClick={handleLink}
+                disabled={!canLink}
+                className={cn(
+                  'px-4 py-2 rounded-xl text-[12px] font-bold flex items-center gap-1.5 transition-all',
+                  canLink
+                    ? 'bg-[#07111F] text-[#FFE600] hover:opacity-90'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed',
+                )}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Vincular seleccionados
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // IMPORT TAB
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -172,6 +390,7 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
   const [odooName,    setOdooName]    = useState('');
   const [mlName,      setMlName]      = useState('');
   const [processing,  setProcessing]  = useState(false);
+  const [linkOpen,    setLinkOpen]    = useState(false);
   const [result,      setResult]      = useState<{
     odooTotal: number; withCost: number; withML: number; sinPublicacion: number; orphans: number;
   } | null>(null);
@@ -204,7 +423,7 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
       const withML         = products.filter(p => !!p.mlItemId).length;
       const sinPublicacion = products.filter(p => p.syncStatus === 'sin_publicacion' || p.syncStatus === 'sin_costo').length;
 
-      store.setProducts(products, { odooFileName: odooName, mlFileName: mlName });
+      store.setProducts(products, { odooFileName: odooName, mlFileName: mlName, orphanPubs });
       setResult({ odooTotal: products.length, withCost, withML, sinPublicacion, orphans: orphanPubs.length });
     } catch (e) {
       console.error('Match error:', e);
@@ -374,17 +593,40 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
               <div className="text-2xl font-black text-[#0784F2]">{result.withML}</div>
               <div className="text-[10px] text-gray-500 uppercase tracking-wide">Vinculados ML</div>
             </div>
-            <div className="text-center bg-white rounded-xl p-3">
+            {/* Sin publicación — clickable when orphan pubs exist */}
+            <button
+              onClick={() => result.sinPublicacion > 0 && result.orphans > 0 ? setLinkOpen(true) : undefined}
+              disabled={result.sinPublicacion === 0 || result.orphans === 0}
+              className={cn(
+                'text-center bg-white rounded-xl p-3 transition-all',
+                result.sinPublicacion > 0 && result.orphans > 0
+                  ? 'hover:ring-2 hover:ring-[#F97316]/40 cursor-pointer group'
+                  : 'cursor-default',
+              )}
+            >
               <div className="text-2xl font-black text-[#F97316]">{result.sinPublicacion}</div>
               <div className="text-[10px] text-gray-500 uppercase tracking-wide">Sin publicación</div>
-            </div>
+              {result.sinPublicacion > 0 && result.orphans > 0 && (
+                <div className="mt-1 flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Layers className="w-3 h-3 text-[#F97316]" />
+                  <span className="text-[9px] font-bold text-[#F97316]">Vincular</span>
+                </div>
+              )}
+            </button>
           </div>
           {result.orphans > 0 && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-[#714B67]/10 rounded-xl">
+            <div
+              className="flex items-center gap-2 px-3 py-2.5 bg-[#714B67]/10 rounded-xl cursor-pointer hover:bg-[#714B67]/15 transition-colors group"
+              onClick={() => setLinkOpen(true)}
+            >
               <Info className="w-3.5 h-3.5 text-[#714B67] shrink-0" />
-              <p className="text-[11px] text-[#714B67]">
-                <strong>{result.orphans}</strong> publicaciones en ML sin regla Odoo — no se importan. Para verlas, actualizá la lista de precios en Odoo.
+              <p className="text-[11px] text-[#714B67] flex-1">
+                <strong>{result.orphans}</strong> publicaciones en ML sin regla Odoo — no se importan.{' '}
+                {result.sinPublicacion > 0 && (
+                  <span className="underline font-bold group-hover:text-[#714B67]">Vincular manualmente →</span>
+                )}
               </p>
+              {result.sinPublicacion > 0 && <Layers className="w-3.5 h-3.5 text-[#714B67] shrink-0" />}
             </div>
           )}
           <p className="text-[11px] text-[#16A34A] text-center">
@@ -392,6 +634,8 @@ function ImportTab({ store }: { store: ReturnType<typeof useMLLabStore> }) {
           </p>
         </div>
       )}
+
+      {linkOpen && <ManualLinkModal store={store} onClose={() => setLinkOpen(false)} />}
     </div>
   );
 }
@@ -978,6 +1222,7 @@ function TableTab({
   const [search,       setSearch]       = useState('');
   const [syncFilter,   setSyncFilter]   = useState<MLSyncStatus | 'todos'>('todos');
   const [profitFilter, setProfitFilter] = useState<string>(initialProfitFilter ?? 'todos');
+  const [linkOpen,     setLinkOpen]     = useState(false);
 
   // Sync if parent pushes a new filter (e.g., user clicks stat in header)
   useEffect(() => {
@@ -1264,7 +1509,19 @@ function TableTab({
                   </td>
 
                   {/* Sync */}
-                  <td className="px-3 py-2.5 text-center"><SyncBadge status={p.syncStatus} /></td>
+                  <td className="px-3 py-2.5 text-center">
+                    <div className="flex flex-col items-center gap-1">
+                      <SyncBadge status={p.syncStatus} />
+                      {p.syncStatus === 'sin_publicacion' && (store.orphanPubs?.length ?? 0) > 0 && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setLinkOpen(true); }}
+                          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[8px] font-bold text-[#714B67] bg-[#714B67]/10 hover:bg-[#714B67]/20 transition-colors whitespace-nowrap"
+                        >
+                          <Layers className="w-2.5 h-2.5" /> Vincular
+                        </button>
+                      )}
+                    </div>
+                  </td>
 
                   {/* Costo */}
                   <td className="px-3 py-2.5 text-right hidden sm:table-cell">
@@ -1348,6 +1605,8 @@ function TableTab({
             className="px-3 py-1.5 text-[12px] border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-white">Siguiente →</button>
         </div>
       )}
+
+      {linkOpen && <ManualLinkModal store={store} onClose={() => setLinkOpen(false)} />}
     </div>
   );
 }

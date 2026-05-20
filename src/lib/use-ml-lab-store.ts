@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import type { MLLabState, MLLabProduct, MLProductParams } from './ml-lab-types';
+import type { MLLabState, MLLabProduct, MLProductParams, MLPublication } from './ml-lab-types';
 import { DEFAULT_ML_PARAMS } from './ml-lab-types';
 
 const STORAGE_KEY = 'acqua_ml_lab_v1';
@@ -44,10 +44,12 @@ export function useMLLabStore() {
   const setProducts = useCallback((products: MLLabProduct[], meta?: {
     odooFileName?: string;
     mlFileName?: string;
+    orphanPubs?: MLPublication[];
   }) => {
     setState(prev => ({
       ...prev,
       products,
+      orphanPubs:   meta?.orphanPubs  !== undefined ? meta.orphanPubs : prev.orphanPubs,
       lastImportAt: new Date().toISOString(),
       odooFileName: meta?.odooFileName ?? prev.odooFileName,
       mlFileName:   meta?.mlFileName   ?? prev.mlFileName,

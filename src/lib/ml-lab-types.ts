@@ -203,6 +203,7 @@ export interface MLLabProduct {
 // ─── Estado global del store ─────────────────────────────────────────────────
 export interface MLLabState {
   products: MLLabProduct[];
+  orphanPubs?: MLPublication[];   // ML pubs without any Odoo rule — stored for manual linking
   globalParams: MLProductParams;
   lastImportAt?: string;
   odooFileName?: string;
