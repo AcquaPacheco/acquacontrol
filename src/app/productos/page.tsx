@@ -1628,6 +1628,7 @@ export default function ProductosPage() {
   const stockInputRef = useRef<HTMLInputElement>(null);
   const [syncingStock, setSyncingStock] = useState(false);
   const [syncToast,    setSyncToast]    = useState<string | null>(null);
+  const [syncResult,   setSyncResult]   = useState<{ matched: number; unmatched: number; unmatchedNames: string[] } | null>(null);
 
   // ── Estado local de activos (para actualizar sin recargar la página) ──
   const [activeMap, setActiveMap] = useState<Record<string, boolean>>({});
@@ -1687,10 +1688,14 @@ export default function ProductosPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows }),
       });
-      const data = await res.json() as { ok: boolean; matched: number; unmatched: number };
+      const data = await res.json() as { ok: boolean; matched: number; unmatched: number; unmatchedNames: string[] };
       if (data.ok) {
-        setSyncToast(`✓ Stock sincronizado: ${data.matched} productos. ${data.unmatched > 0 ? `${data.unmatched} sin match.` : ''} Recargando…`);
-        setTimeout(() => window.location.reload(), 1800);
+        setSyncResult({ matched: data.matched, unmatched: data.unmatched, unmatchedNames: data.unmatchedNames ?? [] });
+        if (data.unmatched === 0) {
+          setSyncToast(`✓ ${data.matched} productos sincronizados. Recargando…`);
+          setTimeout(() => window.location.reload(), 1800);
+        }
+        // If there are unmatched, show the panel and don't auto-reload so user can review
       } else {
         setSyncToast('Error al sincronizar stock.');
       }
@@ -2460,7 +2465,7 @@ export default function ProductosPage() {
 
       </div>
 
-      {/* ── Sync Stock Toast ── */}
+      {/* ── Sync Stock Toast (sin errores / todo ok) ── */}
       {syncToast && (
         <div className="fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-[#07111F] text-white text-[13px] font-semibold rounded-2xl shadow-2xl flex items-center gap-2.5 whitespace-nowrap">
           <RefreshCw className="w-4 h-4 text-[#16A34A]" />
@@ -2468,6 +2473,50 @@ export default function ProductosPage() {
           <button onClick={() => setSyncToast(null)} className="ml-2 opacity-50 hover:opacity-100">
             <X className="w-4 h-4" />
           </button>
+        </div>
+      )}
+
+      {/* ── Sync Result Panel (cuando hay sin match) ── */}
+      {syncResult && syncResult.unmatched > 0 && (
+        <div className="fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[90vw] max-w-sm bg-[#07111F] rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between border-b border-white/10">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 text-[#16A34A]" />
+              <span className="text-[13px] font-bold text-white">
+                {syncResult.matched} sincronizados · {syncResult.unmatched} sin match
+              </span>
+            </div>
+            <button
+              onClick={() => { setSyncResult(null); window.location.reload(); }}
+              className="text-white/40 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="px-4 py-3">
+            <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2">
+              Sin match en products.json:
+            </p>
+            <div className="space-y-1">
+              {syncResult.unmatchedNames.map((name, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <span className="text-[#F97316] text-[11px] shrink-0 mt-px">✗</span>
+                  <span className="text-[11px] text-white/70 leading-tight">{name}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-white/30 mt-3 leading-relaxed">
+              Estos productos no existen en el catálogo (pueden ser virtuales, combos o de uso interno).
+            </p>
+          </div>
+          <div className="px-4 pb-3">
+            <button
+              onClick={() => { setSyncResult(null); window.location.reload(); }}
+              className="w-full py-2 bg-[#16A34A] text-white text-[12px] font-bold rounded-xl hover:opacity-90 transition-opacity"
+            >
+              Entendido — recargar página
+            </button>
+          </div>
         </div>
       )}
 
