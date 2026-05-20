@@ -5,7 +5,11 @@ import { resolve } from 'path';
 const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 const HISTORY_PATH  = resolve(process.cwd(), 'src/data/change-history.json');
 
-interface Product { id: string; active: boolean; cost: number; price: number; notes?: string; name?: string; [key: string]: unknown; }
+interface Product {
+  id: string; active: boolean; hidden: boolean;
+  cost: number; price: number; stock?: number; barcode?: string;
+  notes?: string; name?: string; [key: string]: unknown;
+}
 
 interface HistoryEntry {
   id: string;
@@ -44,17 +48,37 @@ function appendHistory(entry: Omit<HistoryEntry, 'id' | 'timestamp'>) {
 }
 
 /**
+ * GET /api/products?showHidden=true
+ * Returns all products. Hidden products excluded by default.
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const url = new URL(req.url);
+    const showHidden = url.searchParams.get('showHidden') === 'true';
+    const products = readProducts();
+    const result = showHidden ? products : products.filter(p => !p.hidden);
+    return NextResponse.json(result);
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 });
+  }
+}
+
+/**
  * PATCH /api/products
- * Body: { id: string; active?: boolean; cost?: number; price?: number; notes?: string; source?: string }
+ * Body: { id: string; active?: boolean; hidden?: boolean; cost?: number; price?: number; notes?: string; source?: string }
  */
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json() as {
       id: string;
       active?: boolean;
+      hidden?: boolean;
       cost?: number;
       price?: number;
       notes?: string;
+      supplierName?: string;
+      supplierPrice?: number;
+      supplierCode?: string;
       source?: string;
     };
 
@@ -71,6 +95,9 @@ export async function PATCH(req: NextRequest) {
 
     if (typeof body.active === 'boolean' && body.active !== current.active) {
       updates.active = body.active;
+    }
+    if (typeof body.hidden === 'boolean' && body.hidden !== current.hidden) {
+      updates.hidden = body.hidden;
     }
     if (typeof body.cost === 'number' && body.cost !== current.cost) {
       updates.cost = body.cost;
@@ -91,6 +118,15 @@ export async function PATCH(req: NextRequest) {
     if (typeof body.notes === 'string') {
       updates.notes = body.notes;
     }
+    if (typeof body.supplierName === 'string') {
+      updates.supplierName = body.supplierName;
+    }
+    if (typeof body.supplierPrice === 'number') {
+      updates.supplierPrice = body.supplierPrice;
+    }
+    if (typeof body.supplierCode === 'string') {
+      updates.supplierCode = body.supplierCode;
+    }
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ ok: true, id, message: 'Sin cambios' });
@@ -99,7 +135,7 @@ export async function PATCH(req: NextRequest) {
     products[idx] = { ...current, ...updates };
     writeFileSync(PRODUCTS_PATH, JSON.stringify(products, null, 2), 'utf8');
 
-    // Log history for cost and price changes
+    // Log history for tracked fields
     const productName = (current.name as string) || id;
     if (updates.cost !== undefined) {
       historyEntries.push(appendHistory({ productId: id, productName, field: 'cost', oldValue: current.cost, newValue: updates.cost, source }));
@@ -107,8 +143,44 @@ export async function PATCH(req: NextRequest) {
     if (updates.price !== undefined) {
       historyEntries.push(appendHistory({ productId: id, productName, field: 'price', oldValue: current.price, newValue: updates.price, source }));
     }
+    if (updates.supplierName !== undefined) {
+      historyEntries.push(appendHistory({ productId: id, productName, field: 'supplierName', oldValue: current.supplierName, newValue: updates.supplierName, source }));
+    }
 
     return NextResponse.json({ ok: true, id, updates, history: historyEntries });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/products
+ * Body: { id: string }
+ * Removes the product permanently from products.json.
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json() as { id: string };
+    const { id } = body;
+    if (!id) return NextResponse.json({ ok: false, error: 'Falta id' }, { status: 400 });
+
+    const products = readProducts();
+    const idx = products.findIndex(p => p.id === id);
+    if (idx === -1) return NextResponse.json({ ok: false, error: `Producto "${id}" no encontrado` }, { status: 404 });
+
+    const [removed] = products.splice(idx, 1);
+    writeFileSync(PRODUCTS_PATH, JSON.stringify(products, null, 2), 'utf8');
+
+    appendHistory({
+      productId:   id,
+      productName: (removed.name as string) || id,
+      field:       'deleted',
+      oldValue:    true,
+      newValue:    null,
+      source:      'manual',
+    });
+
+    return NextResponse.json({ ok: true, id });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

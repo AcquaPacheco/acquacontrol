@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { useColumnResize } from '@/lib/use-column-resize';
 import productsData from '@/data/products.json';
 import suppliersContactsRaw from '@/data/suppliers.json';
@@ -47,6 +48,10 @@ interface Product {
   image: string | null;
   odooId: number | null;
   active: boolean;
+  hidden: boolean;
+  stock: number;
+  supplierPrice?: number | null;
+  supplierCode?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,8 +72,10 @@ function derivedStatus(p: { cost: number; price: number; margin: number | null }
 
 const products = (productsData as unknown as Product[]).map(p => ({
   ...p,
-  active: p.active !== false, // default true si el campo no existe
-  status: derivedStatus(p),
+  active:  p.active  !== false,   // default true si el campo no existe
+  hidden:  p.hidden  === true,    // default false
+  stock:   typeof p.stock === 'number' ? p.stock : 0,
+  status:  derivedStatus(p),
 }));
 
 const allCategories = ['Todas', ...Array.from(new Set(
@@ -337,13 +344,14 @@ function Row({ label, value, strong, mono }: {
 // PRODUCT INSPECTOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, supplierNames = [] }: {
+function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, onHide, supplierNames = [] }: {
   product: Product;
   onClose: () => void;
   odooUrl?: string;
   onToggleActive?: (id: string, active: boolean) => void;
   onUpdate?: (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string }) => void;
   onDelete?: (id: string) => void;
+  onHide?: (id: string) => void;
   supplierNames?: string[];
 }) {
   const [showMarket,   setShowMarket]   = useState(false);
@@ -1386,8 +1394,29 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
           </div>
         </div>
 
-        {/* ── 12. Eliminar producto ── */}
-        <div className="px-4 pb-5 pt-1">
+        {/* ── 12. Acciones de producto ── */}
+        <div className="px-4 pb-5 pt-1 space-y-1.5">
+
+          {/* Stock badge */}
+          <div className={cn(
+            'flex items-center justify-between px-3 py-2 rounded-xl text-[11px] font-semibold',
+            (p.stock ?? 0) > 0 ? 'bg-[#16A34A]/8 text-[#16A34A]' : 'bg-gray-100 text-gray-400',
+          )}>
+            <span>Stock disponible</span>
+            <span className="font-black text-base">{p.stock ?? 0} u.</span>
+          </div>
+
+          {/* Ocultar (soft-hide) */}
+          {onHide && (
+            <button
+              onClick={() => onHide(p.id)}
+              className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-[#714B67] transition-colors w-full justify-center py-2 rounded-xl hover:bg-[#714B67]/5 border border-transparent hover:border-[#714B67]/15"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              Ocultar producto (archivado)
+            </button>
+          )}
+
           {!confirmDelete ? (
             <button
               onClick={() => setConfirmDelete(true)}
@@ -1590,7 +1619,15 @@ export default function ProductosPage() {
     p.image || buildOdooImageUrl(p.odooId, 'product.template', odooUrl);
 
   // ── Productos eliminados localmente (para ocultar sin recargar) ──
-  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deletedIds,  setDeletedIds]  = useState<Set<string>>(new Set());
+  // ── Ocultos localmente (sin eliminar) ──
+  const [hiddenIds,   setHiddenIds]   = useState<Set<string>>(new Set());
+  // ── Mostrar productos ocultos/archivados ──
+  const [showHidden,  setShowHidden]  = useState(false);
+  // ── Sync stock ──
+  const stockInputRef = useRef<HTMLInputElement>(null);
+  const [syncingStock, setSyncingStock] = useState(false);
+  const [syncToast,    setSyncToast]    = useState<string | null>(null);
 
   // ── Estado local de activos (para actualizar sin recargar la página) ──
   const [activeMap, setActiveMap] = useState<Record<string, boolean>>({});
@@ -1614,6 +1651,54 @@ export default function ProductosPage() {
   const handleDelete = (id: string) => {
     setDeletedIds(prev => new Set([...prev, id]));
     setSelected(null);
+  };
+
+  // ── Ocultar producto (soft-hide — no se elimina) ──
+  const handleHide = async (id: string) => {
+    try {
+      await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, hidden: true }),
+      });
+    } catch { /* ignore */ }
+    setHiddenIds(prev => new Set([...prev, id]));
+    setSelected(null);
+  };
+
+  // ── Sincronizar stock desde archivo "Variante del producto" ──
+  const handleSyncStock = async (file: File) => {
+    setSyncingStock(true);
+    setSyncToast(null);
+    try {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
+      const rows = (rawRows.slice(1) as string[][]).map(r => ({
+        id: String(r[0] ?? ''),
+        name: String(r[1] ?? ''),
+        qty: Number(r[2] ?? 0),
+        barcode: String(r[3] ?? ''),
+        displayName: String(r[4] ?? ''),
+      }));
+      const res = await fetch('/api/products/sync-stock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json() as { ok: boolean; matched: number; unmatched: number };
+      if (data.ok) {
+        setSyncToast(`✓ Stock sincronizado: ${data.matched} productos. ${data.unmatched > 0 ? `${data.unmatched} sin match.` : ''} Recargando…`);
+        setTimeout(() => window.location.reload(), 1800);
+      } else {
+        setSyncToast('Error al sincronizar stock.');
+      }
+    } catch (e) {
+      setSyncToast(`Error: ${String(e)}`);
+    } finally {
+      setSyncingStock(false);
+    }
   };
 
   // ── Leer filtros desde URL params (viene del Socio Acqua / consultor) ──
@@ -1682,6 +1767,8 @@ export default function ProductosPage() {
     setPage(1);
     return products.filter(p => {
       if (deletedIds.has(p.id)) return false;
+      // Ocultos: filtrar siempre salvo que showHidden esté activo
+      if (!showHidden && (p.hidden || hiddenIds.has(p.id))) return false;
       const active = isActive(p);
       // Filtro de inactivos: si se pide 'inactivo' solo muestra inactivos;
       // si se pide 'todos' o cualquier otro filtro, muestra solo activos
@@ -1708,7 +1795,7 @@ export default function ProductosPage() {
       return matchSearch && matchCat && matchSup && matchStatus;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, category, supplier, statusFilter, deletedIds, mlLabMap]);
+  }, [search, category, supplier, statusFilter, deletedIds, hiddenIds, showHidden, mlLabMap]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paginated  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -1884,6 +1971,43 @@ export default function ProductosPage() {
                 </button>
               </div>
 
+              {/* Sincronizar stock + Mostrar ocultos */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <input
+                  ref={stockInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleSyncStock(f); e.target.value = ''; }}
+                />
+                <button
+                  onClick={() => stockInputRef.current?.click()}
+                  disabled={syncingStock}
+                  title="Sincronizar stock desde Variante del producto (Odoo)"
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-[11px] font-semibold transition-colors',
+                    syncingStock ? 'opacity-60 cursor-not-allowed' : 'hover:border-[#0784F2]/50 hover:text-[#0784F2]',
+                  )}
+                >
+                  {syncingStock
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sincronizando…</>
+                    : <><RefreshCw className="w-3.5 h-3.5" /> Sync stock</>}
+                </button>
+                <button
+                  onClick={() => setShowHidden(v => !v)}
+                  title={showHidden ? 'Ocultar archivados' : 'Mostrar archivados'}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2.5 border rounded-xl text-[11px] font-semibold transition-colors',
+                    showHidden
+                      ? 'bg-[#714B67]/10 border-[#714B67]/30 text-[#714B67]'
+                      : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600',
+                  )}
+                >
+                  {showHidden ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {showHidden ? 'Ocultos visibles' : 'Ver ocultos'}
+                </button>
+              </div>
+
               {/* Vista */}
               <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shrink-0">
                 <button
@@ -1959,6 +2083,9 @@ export default function ProductosPage() {
                         <th className="text-center px-3 py-2.5 relative group/th" style={{ width: colW.sku, minWidth: 60 }}>
                           SKU
                           <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('sku')} />
+                        </th>
+                        <th className="text-center px-3 py-2.5 hidden md:table-cell w-16 text-gray-400 font-semibold">
+                          Stock
                         </th>
                         <th className="text-right px-3 py-2.5 relative group/th" style={{ width: colW.costo, minWidth: 70 }}>
                           Costo
@@ -2053,6 +2180,15 @@ export default function ProductosPage() {
                               {p.sku
                                 ? <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{p.sku}</span>
                                 : <span className="text-gray-400">—</span>}
+                            </td>
+                            {/* Stock */}
+                            <td className="px-3 py-2.5 text-center hidden md:table-cell">
+                              <span className={cn(
+                                'text-[11px] font-bold px-1.5 py-0.5 rounded',
+                                (p.stock ?? 0) > 0 ? 'text-[#16A34A] bg-[#16A34A]/10' : 'text-gray-300',
+                              )}>
+                                {(p.stock ?? 0) > 0 ? `${p.stock} u.` : '0'}
+                              </span>
                             </td>
                             <td className="px-3 py-2.5 text-right">
                               <span className="text-[12px] text-gray-600">
@@ -2244,9 +2380,18 @@ export default function ProductosPage() {
                               {mb2.text}
                             </span>
                           </div>
-                          {p.supplierName && (
-                            <p className="text-[9px] text-gray-400 mt-1.5 truncate">{p.supplierName}</p>
-                          )}
+                          <div className="flex items-center justify-between mt-1.5">
+                            {p.supplierName && (
+                              <p className="text-[9px] text-gray-400 truncate">{p.supplierName}</p>
+                            )}
+                            {(p.stock ?? 0) > 0 ? (
+                              <span className="text-[8px] font-black text-[#16A34A] bg-[#16A34A]/10 px-1.5 py-0.5 rounded shrink-0">
+                                {p.stock} u.
+                              </span>
+                            ) : (
+                              <span className="text-[8px] font-semibold text-gray-300 shrink-0">0 u.</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -2299,7 +2444,7 @@ export default function ProductosPage() {
           {inspectorOpen && (
             <div className="hidden lg:block">
               <div className="sticky top-4">
-                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} supplierNames={supplierNameOptions} />}
+                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} supplierNames={supplierNameOptions} />}
               </div>
             </div>
           )}
@@ -2309,11 +2454,22 @@ export default function ProductosPage() {
         {/* Inspector mobile (debajo de la lista) */}
         {inspectorOpen && (
           <div className="lg:hidden mt-5">
-            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} supplierNames={supplierNameOptions} />
+            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} supplierNames={supplierNameOptions} />
           </div>
         )}
 
       </div>
+
+      {/* ── Sync Stock Toast ── */}
+      {syncToast && (
+        <div className="fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-[#07111F] text-white text-[13px] font-semibold rounded-2xl shadow-2xl flex items-center gap-2.5 whitespace-nowrap">
+          <RefreshCw className="w-4 h-4 text-[#16A34A]" />
+          {syncToast}
+          <button onClick={() => setSyncToast(null)} className="ml-2 opacity-50 hover:opacity-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ── ML Assign Modal ── */}
       {mlAssignTarget && (
