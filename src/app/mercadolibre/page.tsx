@@ -659,7 +659,7 @@ function DashboardTab({
       </div>
 
       {/* ── RIGHT: overview or product detail ──────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto min-w-0">
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
 
         {/* Toggle sidebar btn */}
         <button
@@ -672,7 +672,7 @@ function DashboardTab({
 
         {selectedProduct ? (
           /* ── PRODUCT FICHA ── */
-          <div className="h-full flex flex-col">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <ProductFicha
               product={selectedProduct}
               store={store}
@@ -794,7 +794,7 @@ function DashboardTab({
           };
 
           return (
-            <div className="h-full overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0">
 
               {/* ─── GREETING HEADER ─── */}
               <div className="bg-[#07111F] px-6 pt-5 pb-4">
@@ -968,14 +968,21 @@ function TableTab({
   store,
   onSelectProduct,
   selectedId,
+  initialProfitFilter,
 }: {
   store: ReturnType<typeof useMLLabStore>;
   onSelectProduct: (id: string) => void;
   selectedId: string | null;
+  initialProfitFilter?: string;
 }) {
   const [search,       setSearch]       = useState('');
   const [syncFilter,   setSyncFilter]   = useState<MLSyncStatus | 'todos'>('todos');
-  const [profitFilter, setProfitFilter] = useState<string>('todos');
+  const [profitFilter, setProfitFilter] = useState<string>(initialProfitFilter ?? 'todos');
+
+  // Sync if parent pushes a new filter (e.g., user clicks stat in header)
+  useEffect(() => {
+    if (initialProfitFilter) setProfitFilter(initialProfitFilter);
+  }, [initialProfitFilter]);
   const [sortBy,       setSortBy]       = useState<'name' | 'margin' | 'sold' | 'alert'>('alert');
   const [page,         setPage]         = useState(1);
   const [viewMode,     setViewMode]     = useState<'table' | 'grid'>('table');
@@ -1134,6 +1141,12 @@ function TableTab({
                       className={cn('absolute top-2 right-2 w-2.5 h-2.5 rounded-full border-2 border-white', (SYNC_META[p.syncStatus] ?? SYNC_META['error_datos']).dot)}
                       title={(SYNC_META[p.syncStatus] ?? SYNC_META['error_datos']).label}
                     />
+                    {/* Pending Odoo update badge */}
+                    {p.pendingOdooUpdate && (
+                      <span className="absolute top-2 left-2 px-1.5 py-0.5 bg-[#FFE600] rounded text-[8px] font-black text-gray-900 leading-none">
+                        ⚡ Odoo
+                      </span>
+                    )}
                     {/* Margin badge */}
                     {p.calc && (
                       <span className={cn(
@@ -1238,7 +1251,12 @@ function TableTab({
 
                   {/* Name + SKU */}
                   <td className="px-4 py-2.5">
-                    <p className={cn('text-[12px] font-semibold line-clamp-1', isSelected ? 'text-[#07111F]' : 'text-gray-900')}>{p.name}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={cn('text-[12px] font-semibold line-clamp-1', isSelected ? 'text-[#07111F]' : 'text-gray-900')}>{p.name}</p>
+                      {p.pendingOdooUpdate && (
+                        <span className="shrink-0 px-1.5 py-0.5 bg-[#FFE600] rounded text-[8px] font-black text-gray-900 leading-none whitespace-nowrap">⚡ Odoo</span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       {p.sku && <span className="text-[9px] font-mono text-gray-400">{p.sku}</span>}
                       {p.mlItemId && <span className="text-[9px] font-mono text-[#0784F2]">{p.mlItemId}</span>}
@@ -1941,28 +1959,80 @@ function ProductFicha({
                     </div>
 
                     {/* Odoo data */}
-                    <div className="bg-[#714B67]/5 border border-[#714B67]/15 rounded-2xl p-4">
-                      <p className="text-[10px] font-bold text-[#714B67] uppercase tracking-wide mb-3">Para Odoo</p>
+                    <div className={cn(
+                      'rounded-2xl p-4',
+                      product.pendingOdooUpdate
+                        ? 'bg-[#FFE600]/10 border-2 border-[#FFE600]/50'
+                        : 'bg-[#714B67]/5 border border-[#714B67]/15',
+                    )}>
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-[10px] font-bold text-[#714B67] uppercase tracking-wide">Para Odoo</p>
+                        {product.pendingOdooUpdate && (
+                          <span className="flex items-center gap-1 px-2 py-0.5 bg-[#FFE600] rounded-full text-[9px] font-black text-gray-900 uppercase tracking-wide">
+                            ⚡ Pendiente actualizar en Odoo
+                          </span>
+                        )}
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="text-center">
                           <div className="text-[10px] text-gray-400 mb-1">Markup actual</div>
-                          <div className="text-[16px] font-black text-gray-900">{product.markup.toFixed(1)}%</div>
+                          <div className={cn(
+                            'text-[16px] font-black',
+                            product.pendingOdooUpdate ? 'text-[#FFE600] line-through opacity-60' : 'text-gray-900',
+                          )}>{(product.localMarkup !== undefined ? product.localMarkup : product.markup).toFixed(1)}%</div>
                         </div>
                         <div className="text-center">
                           <div className="text-[10px] text-gray-400 mb-1">Lista Markup (sin IVA)</div>
                           <div className="text-[16px] font-black text-gray-900">{ars(calc.odooListMarkup)}</div>
                         </div>
-                        <div className="text-center">
-                          <div className="text-[10px] text-gray-400 mb-1">Markup ideal ({params.idealMargin}% margen)</div>
-                          <div className="text-[16px] font-black text-[#16A34A]">
-                            {idealCalc ? `${idealCalc.markup.toFixed(1)}%` : '—'}
-                          </div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-[10px] text-gray-400 mb-1">Lista ML ideal</div>
-                          <div className="text-[16px] font-black text-[#16A34A]">{idealPrice > 0 ? ars(idealPrice) : '—'}</div>
-                        </div>
+                        {idealCalc && (
+                          <>
+                            <div className="text-center bg-[#16A34A]/5 rounded-xl p-2">
+                              <div className="text-[10px] text-gray-400 mb-0.5">Markup ideal ({params.idealMargin}% margen)</div>
+                              <div className="text-[18px] font-black text-[#16A34A]">{idealCalc.markup.toFixed(1)}%</div>
+                            </div>
+                            <div className="text-center bg-[#16A34A]/5 rounded-xl p-2">
+                              <div className="text-[10px] text-gray-400 mb-0.5">Lista ML ideal</div>
+                              <div className="text-[18px] font-black text-[#16A34A]">{ars(idealPrice)}</div>
+                            </div>
+                          </>
+                        )}
                       </div>
+                      {idealCalc && (
+                        <button
+                          onClick={() => {
+                            const newMarkup = idealCalc.markup;
+                            const newOdooPrice = product.cost * (1 + newMarkup / 100);
+                            const newOdooListML = newOdooPrice * 1.21;
+                            const newCalc = product.mlPrice
+                              ? calcProfitability(product.mlPrice, product.cost, params) ?? undefined
+                              : undefined;
+                            store.updateProduct(product.id, {
+                              markup: newMarkup,
+                              localMarkup: newMarkup,
+                              odooPrice: newOdooPrice,
+                              odooListML: newOdooListML,
+                              pendingOdooUpdate: true,
+                              calc: newCalc,
+                              alerts: generateAlerts(
+                                { ...product, markup: newMarkup, odooPrice: newOdooPrice, odooListML: newOdooListML },
+                                params,
+                              ),
+                            });
+                          }}
+                          className={cn(
+                            'mt-3 w-full py-2.5 rounded-xl text-[12px] font-black transition-all flex items-center justify-center gap-2',
+                            product.pendingOdooUpdate
+                              ? 'bg-gray-100 text-gray-400 cursor-default'
+                              : 'bg-[#16A34A] text-white hover:bg-[#15803d]',
+                          )}
+                          disabled={product.pendingOdooUpdate}
+                        >
+                          {product.pendingOdooUpdate
+                            ? '✓ Markup ideal aplicado — actualizá en Odoo'
+                            : `⚡ Aplicar markup ideal (${idealCalc.markup.toFixed(1)}%) para ${params.idealMargin}% margen`}
+                        </button>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -2556,9 +2626,15 @@ type MainTab = 'dashboard' | 'importar' | 'tabla' | 'export';
 
 export default function MLLabPage() {
   const store = useMLLabStore();
-  const [activeTab,    setActiveTab]    = useState<MainTab>('dashboard');
-  const [selectedId,   setSelectedId]   = useState<string | null>(null);
-  const [showParamsPanel, setShowParamsPanel] = useState(false);
+  const [activeTab,        setActiveTab]        = useState<MainTab>('dashboard');
+  const [selectedId,       setSelectedId]       = useState<string | null>(null);
+  const [showParamsPanel,  setShowParamsPanel]  = useState(false);
+  const [tablaFilterReq,   setTablaFilterReq]   = useState<string>('todos');
+
+  const goToTablaWithFilter = (filter: string) => {
+    setTablaFilterReq(filter);
+    setActiveTab('tabla');
+  };
   const [geminiKey,    setGeminiKey]    = useState('');
   const [geminiInput,  setGeminiInput]  = useState('');
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -2613,19 +2689,23 @@ export default function MLLabPage() {
             </div>
 
             {stats.total > 0 && (
-              <div className="hidden md:flex items-center gap-5">
+              <div className="hidden md:flex items-center gap-1">
                 {[
-                  { label: 'Total',       value: stats.total,       color: 'text-[#07111F]' },
-                  { label: 'Rentables',   value: stats.rentables,   color: 'text-[#16A34A]' },
-                  { label: 'Bajo margen', value: stats.bajoMargen,  color: 'text-[#D97706]' },
-                  { label: 'Pierden',     value: stats.pierde,      color: 'text-[#DC2626]' },
-                  { label: 'Activas ML',  value: stats.activas,     color: 'text-[#07111F]' },
-                ].map((s, i) => (
-                  <div key={s.label} className="text-center">
-                    {i > 0 && <div className="w-px h-8 bg-[#07111F]/10 absolute -ml-2.5 mt-0" />}
+                  { label: 'Total',       value: stats.total,      color: 'text-[#07111F]',   filter: 'todos'      },
+                  { label: 'Rentables',   value: stats.rentables,  color: 'text-[#16A34A]',   filter: 'rentable'   },
+                  { label: 'Bajo margen', value: stats.bajoMargen, color: 'text-[#D97706]',   filter: 'bajo_margen'},
+                  { label: 'Pierden',     value: stats.pierde,     color: 'text-[#DC2626]',   filter: 'pierde'     },
+                  { label: 'Activas ML',  value: stats.activas,    color: 'text-[#07111F]',   filter: 'todos'      },
+                ].map(s => (
+                  <button
+                    key={s.label}
+                    onClick={() => goToTablaWithFilter(s.filter)}
+                    title={`Ver ${s.label} en tabla`}
+                    className="text-center px-3 py-1.5 rounded-xl hover:bg-[#07111F]/10 transition-colors cursor-pointer"
+                  >
                     <div className={cn('text-xl font-black', s.color)}>{s.value}</div>
                     <div className="text-[9px] text-[#07111F]/50 uppercase tracking-wide font-semibold">{s.label}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -2751,7 +2831,7 @@ export default function MLLabPage() {
           )}
           {activeTab === 'importar' && <ImportTab store={store} />}
           {activeTab === 'tabla' && (
-            <TableTab store={store} onSelectProduct={handleSelectProduct} selectedId={selectedId} />
+            <TableTab store={store} onSelectProduct={handleSelectProduct} selectedId={selectedId} initialProfitFilter={tablaFilterReq} />
           )}
           {activeTab === 'export' && <ExportTab store={store} />}
         </div>

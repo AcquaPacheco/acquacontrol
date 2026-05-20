@@ -194,6 +194,8 @@ export interface MLLabProduct {
 
   // ── Meta ─────────────────────────────────────────────────────────
   notes?: string;
+  pendingOdooUpdate?: boolean;   // user applied local markup — update in Odoo to sync
+  localMarkup?: number;          // the markup the user applied locally
   createdAt: string;
   updatedAt: string;
 }

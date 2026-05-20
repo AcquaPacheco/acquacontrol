@@ -786,19 +786,25 @@ export function matchAndBuild(
     let confidence = 0;
     let isDuplicate = false;
 
+    // Effective SKU: use Odoo rule SKU first; fall back to inventory SKU (sys.sku).
+    // This covers Odoo pricelist rows that have no [SKU] prefix in their product name
+    // (e.g. "Cepillo Recto Plastico (INOX)") but whose inventory product has sku "V-400001".
+    const effectiveSku = rule.sku ?? sys?.sku ?? undefined;
+
     // Priority 1: SKU exact match (or exact after stripping brand prefix V-/M-/etc.)
-    if (rule.sku) {
-      const exact = mlPubs.filter(m => m.sku && skuMatch(m.sku, rule.sku!));
+    if (effectiveSku) {
+      const exact = mlPubs.filter(m => m.sku && skuMatch(m.sku, effectiveSku));
       if (exact.length === 1)    { mlPub = exact[0]; matchMethod = 'sku'; confidence = 97; }
       else if (exact.length > 1) {
         mlPub = exact[0]; matchMethod = 'sku'; confidence = 90; isDuplicate = true;
-        // Mark ALL duplicate pubs as matched so they don't appear as "Sin regla Odoo"
+        // Mark ALL duplicate pubs as matched (catalog duplicates, etc.)
         exact.forEach(m => matchedMLIds.add(m.mlItemId));
       }
     }
-    // Priority 2: Barcode exact
-    if (!mlPub && rule.barcode) {
-      const found = mlPubs.find(m => skuMatch(m.sku ?? '', rule.barcode!));
+    // Priority 2: Barcode exact (rule barcode OR sys barcode)
+    const effectiveBarcode = rule.barcode ?? sys?.barcode ?? undefined;
+    if (!mlPub && effectiveBarcode) {
+      const found = mlPubs.find(m => skuMatch(m.sku ?? '', effectiveBarcode));
       if (found) { mlPub = found; matchMethod = 'barcode'; confidence = 95; }
     }
     // Priority 3: Odoo product template ID appears in ML SKU
@@ -807,11 +813,12 @@ export function matchAndBuild(
       const found = mlPubs.find(m => m.sku?.includes(idStr) || m.title?.includes(idStr));
       if (found) { mlPub = found; matchMethod = 'id'; confidence = 85; }
     }
-    // Priority 3b: Odoo SKU core appears inside ML SKU or ML title
+    // Priority 3b: effective SKU core appears inside ML SKU or ML title
     // Catches: V-101001 (core="101001") ↔ ML title "Acople Rápido Espigado 1 1/2 - Vulcano 101001"
     //          1257 (core="1257")        ↔ ML sku "00001257"
-    if (!mlPub && rule.sku) {
-      const core = skuCore(rule.sku);
+    //          V-400001 (sys.sku) ↔ ML sku "400001" (no [SKU] in pricelist name)
+    if (!mlPub && effectiveSku) {
+      const core = skuCore(effectiveSku);
       if (core.length >= 4) {
         const found = mlPubs.find(m => {
           const mSkuCore = skuCore(m.sku ?? '');
