@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import {
-  LayoutDashboard, Users, Package, DollarSign, TrendingUp,
+  LayoutDashboard, Users, Package, TrendingUp,
   Tag, FileSpreadsheet, ShoppingCart, MessageSquare, History,
   Settings, Bell, ChevronDown, Menu, X,
 } from 'lucide-react';
@@ -15,7 +15,6 @@ const primaryNavItems = [
   { label: 'Control',       href: '/',            icon: LayoutDashboard },
   { label: 'Proveedores',   href: '/proveedores',  icon: Users           },
   { label: 'Productos',     href: '/productos',    icon: Package         },
-  { label: 'Costos',        href: '/costos',       icon: DollarSign      },
   { label: 'Rentabilidad',  href: '/rentabilidad', icon: TrendingUp      },
   { label: 'Promos',        href: '/promos',       icon: Tag             },
   { label: 'Historial',     href: '/historial',    icon: History         },
