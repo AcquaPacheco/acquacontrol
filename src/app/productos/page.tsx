@@ -1726,10 +1726,16 @@ export default function ProductosPage() {
   // ── Stats globales ──
   const stats = useMemo(() => {
     // Solo productos activos para las stats
-    const activos = products.filter(p => isActive(p));
+    const activos = products.filter(p => isActive(p) && !p.hidden);
     const inactivos = products.length - activos.length;
     // Solo incluir en el promedio productos con precio y costo reales (excluye placeholders price=1)
     const withMargin = activos.filter(p => p.margin !== null && p.price > 1 && p.cost > 0);
+    // Stock
+    const conStock   = activos.filter(p => (p.stock ?? 0) > 0);
+    const sinStock   = activos.filter(p => (p.stock ?? 0) === 0);
+    const bajoStock  = activos.filter(p => (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3);
+    const totalUnidades = activos.reduce((a, p) => a + (p.stock ?? 0), 0);
+    const stockValue    = activos.reduce((a, p) => a + (p.stock ?? 0) * (p.cost ?? 0), 0);
     return {
       total:        activos.length,
       inactivos,
@@ -1741,6 +1747,11 @@ export default function ProductosPage() {
       avgMargin:    withMargin.length
         ? Math.round(withMargin.reduce((a, p) => a + p.margin!, 0) / withMargin.length * 10) / 10
         : 0,
+      conStock:     conStock.length,
+      sinStock:     sinStock.length,
+      bajoStock:    bajoStock.length,
+      totalUnidades,
+      stockValue,
     };
   }, []);
 
@@ -1757,6 +1768,10 @@ export default function ProductosPage() {
       ins.push({ type: 'warning' as const, text: `${stats.revisar} productos requieren revisión de precios.`,              filterKey: 'revisar'   });
     if (stats.sinProveedor > 0)
       ins.push({ type: 'warning' as const, text: `${stats.sinProveedor} sin proveedor asignado en Odoo.` });
+    if (stats.bajoStock > 0)
+      ins.push({ type: 'warning' as const, text: `${stats.bajoStock} productos con stock ≤ 3 u. — reponer pronto.`, filterKey: 'bajo_stock' });
+    if (stats.sinStock > 0)
+      ins.push({ type: 'info' as const, text: `${stats.sinStock} sin stock disponible.`, filterKey: 'sin_stock' });
     if (stats.inactivos > 0)
       ins.push({ type: 'info' as const, text: `${stats.inactivos} productos inactivos (excluidos del cálculo).`, filterKey: 'inactivo' });
     ins.push({
@@ -1792,11 +1807,14 @@ export default function ProductosPage() {
       const matchStatus =
         statusFilter === 'todos'    ||
         p.status === statusFilter   ||
-        (statusFilter === 'noImage'   && !getImg(p)) ||
-        (statusFilter === 'noPrice'   && (!p.price || p.price === 0)) ||
-        (statusFilter === 'negMargin' && p.margin !== null && p.margin < 0) ||
-        (statusFilter === 'lowMargin' && p.margin !== null && p.margin >= 0 && p.margin < 30) ||
-        (statusFilter === 'enML'      && !!getMLLabInfo(p));
+        (statusFilter === 'noImage'    && !getImg(p)) ||
+        (statusFilter === 'noPrice'    && (!p.price || p.price === 0)) ||
+        (statusFilter === 'negMargin'  && p.margin !== null && p.margin < 0) ||
+        (statusFilter === 'lowMargin'  && p.margin !== null && p.margin >= 0 && p.margin < 30) ||
+        (statusFilter === 'enML'       && !!getMLLabInfo(p)) ||
+        (statusFilter === 'con_stock'  && (p.stock ?? 0) > 0) ||
+        (statusFilter === 'sin_stock'  && (p.stock ?? 0) === 0) ||
+        (statusFilter === 'bajo_stock' && (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3);
       return matchSearch && matchCat && matchSup && matchStatus;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1824,9 +1842,21 @@ export default function ProductosPage() {
             <Divider />
             <Stat label="Margen prom." value={`${stats.avgMargin}%`}     color="text-[#16A34A]" />
             <Divider />
-            <Stat label="En POS"       value={String(stats.enPos)}       color="text-[#0784F2]" />
+            <button onClick={() => { setStatusFilter('con_stock'); setPage(1); }} className="text-center hover:opacity-80 transition-opacity">
+              <Stat label="Con stock"  value={String(stats.conStock)}    color="text-[#16A34A]" />
+            </button>
             <Divider />
-            <Stat label="Online"       value={String(stats.online)}      color="text-[#0784F2]" />
+            <button onClick={() => { setStatusFilter('sin_stock'); setPage(1); }} className="text-center hover:opacity-80 transition-opacity">
+              <Stat label="Sin stock"  value={String(stats.sinStock)}    color={stats.sinStock > 100 ? 'text-[#F97316]' : 'text-white/60'} />
+            </button>
+            {stats.bajoStock > 0 && (
+              <>
+                <Divider />
+                <button onClick={() => { setStatusFilter('bajo_stock'); setPage(1); }} className="text-center hover:opacity-80 transition-opacity">
+                  <Stat label="Stock bajo" value={String(stats.bajoStock)} color="text-[#F97316]" />
+                </button>
+              </>
+            )}
             {stats.sinCosto > 0 && (
               <>
                 <Divider />
@@ -1902,6 +1932,62 @@ export default function ProductosPage() {
                   );
                 })}
               </div>
+            </div>
+
+            {/* ── Stock KPIs ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+              {[
+                {
+                  label: 'Con stock',
+                  value: stats.conStock,
+                  sub: `${stats.totalUnidades.toLocaleString('es-AR')} unidades totales`,
+                  color: 'text-[#16A34A]',
+                  bg: 'bg-[#16A34A]/8 border-[#16A34A]/15',
+                  filter: 'con_stock',
+                },
+                {
+                  label: 'Sin stock',
+                  value: stats.sinStock,
+                  sub: 'Productos en 0',
+                  color: stats.sinStock > 100 ? 'text-[#F97316]' : 'text-gray-500',
+                  bg: stats.sinStock > 100 ? 'bg-[#F97316]/8 border-[#F97316]/15' : 'bg-gray-50 border-gray-200',
+                  filter: 'sin_stock',
+                },
+                {
+                  label: 'Stock bajo',
+                  value: stats.bajoStock,
+                  sub: '≤ 3 unidades',
+                  color: stats.bajoStock > 0 ? 'text-[#F97316]' : 'text-gray-400',
+                  bg: stats.bajoStock > 0 ? 'bg-[#F97316]/8 border-[#F97316]/15' : 'bg-gray-50 border-gray-200',
+                  filter: 'bajo_stock',
+                },
+                {
+                  label: 'Valor inventario',
+                  value: null,
+                  valueFmt: formatARS(stats.stockValue),
+                  sub: `${stats.conStock} SKUs valorados`,
+                  color: 'text-[#0784F2]',
+                  bg: 'bg-[#0784F2]/8 border-[#0784F2]/15',
+                  filter: null,
+                },
+              ].map(kpi => (
+                <button
+                  key={kpi.label}
+                  onClick={() => kpi.filter ? (setStatusFilter(statusFilter === kpi.filter ? 'todos' : kpi.filter), setPage(1)) : undefined}
+                  className={cn(
+                    'text-left px-4 py-3 rounded-2xl border transition-all',
+                    kpi.bg,
+                    kpi.filter ? 'cursor-pointer hover:shadow-sm hover:scale-[1.01]' : 'cursor-default',
+                    kpi.filter && statusFilter === kpi.filter ? 'ring-2 ring-offset-1 ring-current' : '',
+                  )}
+                >
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">{kpi.label}</p>
+                  <p className={cn('text-2xl font-black leading-none', kpi.color)}>
+                    {kpi.valueFmt ?? kpi.value}
+                  </p>
+                  <p className="text-[10px] text-gray-400 mt-1">{kpi.sub}</p>
+                </button>
+              ))}
             </div>
 
             {/* Toolbar */}
