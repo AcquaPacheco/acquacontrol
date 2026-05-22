@@ -1,114 +1,151 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
 
-// ML Search usa la API pública de MercadoLibre — no requiere credenciales
+// ─── Leer credenciales ML desde settings.json (prioridad) o .env (fallback) ──
+const SETTINGS_PATH = resolve(process.cwd(), 'src/data/settings.json');
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface MLItem {
-  id: string;
-  title: string;
-  price: number;
-  currency_id: string;
-  condition: string;
-  permalink: string;
-  thumbnail: string;
-  sold_quantity: number;
-  available_quantity: number;
-  shipping: { free_shipping: boolean; logistic_type?: string };
-  installments?: { quantity: number; amount: number; rate: number; currency_id: string } | null;
-  seller?: { id: number; nickname: string };
-  tags?: string[];
+function readMLCredentials(): { appId: string; appSecret: string; site: string } {
+  try {
+    if (existsSync(SETTINGS_PATH)) {
+      const s = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) as {
+        mlAppId?: string; mlAppSecret?: string; mlSite?: string;
+      };
+      if (s.mlAppId && s.mlAppSecret) {
+        return { appId: s.mlAppId, appSecret: s.mlAppSecret, site: s.mlSite ?? 'MLA' };
+      }
+    }
+  } catch { /* ignorar */ }
+  return {
+    appId:     process.env.ML_APP_ID     ?? '',
+    appSecret: process.env.ML_APP_SECRET ?? '',
+    site:      process.env.ML_SITE       ?? 'MLA',
+  };
 }
 
-interface MLSearchResponse {
-  results: MLItem[];
-  paging: { total: number; primary_results: number };
-}
+// ─── Token cache (in-memory, se renueva automáticamente) ─────────────────────
+let cachedToken: { token: string; expiresAt: number; site: string } | null = null;
 
-// ─── Clean up query for ML ────────────────────────────────────────────────────
-function cleanQuery(q: string): string {
-  return q
-    .replace(/[""'']/g, '')      // remove curly quotes
-    .replace(/[^\w\sáéíóúüñÁÉÍÓÚÜÑ-]/g, ' ')  // strip special chars except spanish
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 60);
-}
+async function getAccessToken(): Promise<{ token: string; site: string } | null> {
+  const { appId, appSecret, site } = readMLCredentials();
+  if (!appId || !appSecret) return null;
 
-// ─── Route ────────────────────────────────────────────────────────────────────
-export async function GET(req: NextRequest) {
-  const rawQ    = req.nextUrl.searchParams.get('q') ?? '';
-  const q       = cleanQuery(rawQ);
-  const limit   = Math.min(Number(req.nextUrl.searchParams.get('limit') ?? '8'), 20);
-  const exclude = req.nextUrl.searchParams.get('exclude') ?? '';
-
-  if (!q || q.length < 2) {
-    return NextResponse.json({ ok: false, error: 'Query too short' }, { status: 400 });
+  // Token válido todavía (buffer 5 min)
+  if (cachedToken && Date.now() < cachedToken.expiresAt - 300_000) {
+    return { token: cachedToken.token, site: cachedToken.site };
   }
 
   try {
-    const url = `https://api.mercadolibre.com/sites/MLA/search?q=${encodeURIComponent(q)}&limit=${limit}&sort=relevance`;
-    const res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
-      next: { revalidate: 300 },
+    const res = await fetch('https://api.mercadolibre.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body: new URLSearchParams({
+        grant_type:    'client_credentials',
+        client_id:     appId,
+        client_secret: appSecret,
+      }).toString(),
+      cache: 'no-store',
     });
 
     if (!res.ok) {
-      return NextResponse.json(
-        { ok: false, error: `ML API error: ${res.status}` },
-        { status: res.status },
-      );
+      console.error('[ml-token] OAuth error:', res.status, await res.text());
+      return null;
     }
 
-    const data = (await res.json()) as MLSearchResponse;
+    const data = await res.json() as { access_token: string; expires_in: number };
+    cachedToken = {
+      token:     data.access_token,
+      site,
+      expiresAt: Date.now() + data.expires_in * 1000,
+    };
+    return { token: cachedToken.token, site };
+  } catch (e) {
+    console.error('[ml-token] OAuth fetch failed:', e);
+    return null;
+  }
+}
 
-    // Sellers to exclude (own store — apacheco.tienda, etc.)
-    const EXCLUDED_BASE = ['apacheco', 'apacheco.tienda', 'acquapacheco'];
-    if (exclude) EXCLUDED_BASE.push(...exclude.toLowerCase().split(','));
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// ─── GET /api/ml-search?q=... → devuelve token + site para que el browser llame ML directo ──
+// ML bloquea requests server-side (anti-scraping). El browser los hace sin restricción.
+export async function GET(req: NextRequest) {
+  const rawQ    = req.nextUrl.searchParams.get('q') ?? '';
+  const limit   = Math.min(Number(req.nextUrl.searchParams.get('limit') ?? '8'), 20);
+  const mode    = req.nextUrl.searchParams.get('mode') ?? 'token'; // 'token' | 'direct'
 
-    const items = (data.results ?? [])
-      .filter(item => {
-        const nick = normalize(item.seller?.nickname ?? '');
-        return !EXCLUDED_BASE.some(ex => nick.includes(normalize(ex)));
-      })
-      .map(item => ({
-        id:           item.id,
-        title:        item.title,
-        price:        item.price,
-        condition:    item.condition,
-        permalink:    item.permalink,
-        thumbnail:    item.thumbnail?.replace('http:', 'https:') ?? null,
-        freeShipping: item.shipping?.free_shipping ?? false,
-        logisticType: item.shipping?.logistic_type ?? null,
-        soldQty:      item.sold_quantity ?? 0,
-        stock:        item.available_quantity ?? 0,
-        installments: item.installments
-          ? { qty: item.installments.quantity, amount: item.installments.amount, rate: item.installments.rate }
-          : null,
-        seller:       item.seller?.nickname ?? null,
-        tags:         item.tags ?? [],
-      }));
-
-    // Market stats
-    const prices        = items.map(i => i.price).filter(p => p > 0);
-    const minPrice      = prices.length ? Math.min(...prices) : 0;
-    const maxPrice      = prices.length ? Math.max(...prices) : 0;
-    const avgPrice      = prices.length ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length) : 0;
-    const medPrice      = prices.length ? prices.slice().sort((a, b) => a - b)[Math.floor(prices.length / 2)] : 0;
-    const freeShipCount = items.filter(i => i.freeShipping).length;
-    const hasInstCount  = items.filter(i => i.installments && i.installments.rate === 0).length;
-
+  // ── Modo token: el browser pide el token y llama ML directo ──────────────
+  if (mode === 'token') {
+    const auth = await getAccessToken();
+    if (!auth) {
+      return NextResponse.json({ ok: false, error: 'credentials' }, { status: 401 });
+    }
     return NextResponse.json({
-      ok: true,
-      total: data.paging?.total ?? 0,
-      items,
-      market: {
-        minPrice, maxPrice, avgPrice, medPrice,
-        freeShipPct:     items.length ? Math.round((freeShipCount / items.length) * 100) : 0,
-        installmentsPct: items.length ? Math.round((hasInstCount  / items.length) * 100) : 0,
+      ok:    true,
+      token: auth.token,
+      site:  auth.site,
+      q:     rawQ,
+      limit,
+    });
+  }
+
+  // ── Modo direct: intenta hacer el search server-side (fallback) ───────────
+  if (!rawQ || rawQ.length < 2) {
+    return NextResponse.json({ ok: false, error: 'Query too short' }, { status: 400 });
+  }
+
+  const auth = await getAccessToken();
+  if (!auth) {
+    return NextResponse.json({ ok: false, error: 'credentials' }, { status: 401 });
+  }
+
+  try {
+    const q = rawQ.replace(/[""'']/g, '').replace(/[^\w\sáéíóúüñÁÉÍÓÚÜÑ-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const url = `https://api.mercadolibre.com/sites/${auth.site}/search?q=${encodeURIComponent(q)}&limit=${limit}&sort=relevance`;
+    const res = await fetch(url, {
+      headers: {
+        Accept:        'application/json',
+        Authorization: `Bearer ${auth.token}`,
+        'User-Agent':  'Mozilla/5.0 (compatible; AcquaControlOS/1.0)',
       },
+      cache: 'no-store',
     });
 
+    if (res.status === 401 || res.status === 403) {
+      cachedToken = null;
+      const errBody = await res.text();
+      console.error('[ml-search] ML search error', res.status, errBody);
+      return NextResponse.json({ ok: false, error: 'credentials' }, { status: 401 });
+    }
+
+    if (!res.ok) {
+      return NextResponse.json({ ok: false, error: `ML API error: ${res.status}` }, { status: res.status });
+    }
+
+    const data = await res.json() as {
+      results: Array<{
+        id: string; title: string; price: number; condition: string; permalink: string;
+        thumbnail: string; sold_quantity: number; available_quantity: number;
+        shipping: { free_shipping: boolean; logistic_type?: string };
+        installments?: { quantity: number; amount: number; rate: number } | null;
+        seller?: { nickname: string };
+        tags?: string[];
+      }>;
+      paging: { total: number };
+    };
+
+    const EXCLUDED = ['apacheco', 'acquapacheco'];
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const items = (data.results ?? [])
+      .filter(item => !EXCLUDED.some(ex => normalize(item.seller?.nickname ?? '').includes(normalize(ex))))
+      .map(item => ({
+        id: item.id, title: item.title, price: item.price,
+        condition: item.condition, permalink: item.permalink,
+        thumbnail: item.thumbnail?.replace('http:', 'https:') ?? null,
+        freeShipping: item.shipping?.free_shipping ?? false,
+        soldQty: item.sold_quantity ?? 0,
+        seller: item.seller?.nickname ?? null,
+      }));
+
+    return NextResponse.json({ ok: true, total: data.paging?.total ?? 0, items });
   } catch (e) {
     console.error('[ml-search]', e);
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });

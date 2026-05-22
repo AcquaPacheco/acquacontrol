@@ -5,14 +5,14 @@ import { MessageSquare, X, Send, ArrowUpRight, Sparkles, ChevronRight, Loader2, 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { loadGeminiKey } from '@/lib/gemini-key';
+import { loadGeminiKeyAsync } from '@/lib/gemini-key';
 import productsData from '@/data/products.json';
 import suppliersData from '@/data/suppliers.json';
 
 // ── Cómputo de stats reales ─────────────────────────────────────────────────
-type ProdRow = { cost: number; price: number; margin: number | null; active: boolean; supplierName: string | null; name: string; category: string | null };
+type ProdRow = { cost: number; price: number; margin: number | null; active: boolean; hidden?: boolean; supplierName: string | null; name: string; category: string | null };
 const allProducts   = productsData as unknown as ProdRow[];
-const activeProducts = allProducts.filter(p => p.active !== false);
+const activeProducts = allProducts.filter(p => p.active !== false && !p.hidden);
 const sinCosto       = activeProducts.filter(p => !p.cost || p.cost === 0);
 const sinPrecio      = activeProducts.filter(p => !p.price || p.price <= 1);
 const criticos       = activeProducts.filter(p => p.margin !== null && p.margin < 35 && p.price > 1 && p.cost > 0);
@@ -88,7 +88,7 @@ export function FloatingConsultor() {
     { role: 'assistant', text: greeting },
   ]);
 
-  useEffect(() => { setGeminiKey(loadGeminiKey()); }, []);
+  useEffect(() => { loadGeminiKeyAsync().then(k => setGeminiKey(k)); }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 150); }, [open]);
 

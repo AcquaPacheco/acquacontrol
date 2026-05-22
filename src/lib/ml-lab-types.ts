@@ -43,6 +43,9 @@ export interface MLPublication {
   sku?: string;               // referencia interna del vendedor
   condition?: string;
   thumbnail?: string;
+  familyId?: string;          // FAMILY_ID — agrupa variantes de catálogo (mismo producto, múltiples listings)
+  mlCategory?: string;        // categoría de la publicación
+  description?: string;       // descripción actual de la publicación en ML
   raw: Record<string, unknown>;
 }
 
@@ -52,8 +55,9 @@ export interface MLProductParams {
   fixedFee: number;          // cargo fijo ML por unidad ($, default: 0)
   shippingCost: number;      // costo de envío si ofrezco gratis ($)
   iibb: number;              // Ingresos Brutos % (default: 3.5)
-  installmentsCost: number;  // costo de cuotas sin interés % (default: 0)
-  advertising: number;       // % publicidad ML Ads (default: 0)
+  installmentsCost: number;        // costo de cuotas sin interés % (default: 0)
+  defaultInstallmentsCost: number; // % aplicado automáticamente si ML export dice hasInstallments=true (default: 9.3)
+  advertising: number;             // % publicidad ML Ads (default: 0)
   otherCosts: number;        // otros costos fijos por unidad ($)
   minMargin: number;         // margen mínimo aceptable % (default: 25)
   idealMargin: number;       // margen objetivo % (default: 35)
@@ -67,6 +71,7 @@ export const DEFAULT_ML_PARAMS: MLProductParams = {
   shippingCost: 0,
   iibb: 3.5,
   installmentsCost: 0,
+  defaultInstallmentsCost: 9.3,
   advertising: 0,
   otherCosts: 0,
   minMargin: 25,
@@ -176,6 +181,9 @@ export interface MLLabProduct {
   mlPermalink?: string;
   mlCondition?: string;
   mlThumbnail?: string;
+  mlFamilyId?: string;        // FAMILY_ID — para detectar duplicados de catálogo
+  mlCategory?: string;        // categoría en ML
+  mlDescription?: string;     // descripción actual de la publicación en ML
 
   // ── Sincronización ───────────────────────────────────────────────
   syncStatus: MLSyncStatus;

@@ -17,6 +17,8 @@ import { useMLProducts, ML_STATUS_LABELS, ML_STATUS_COLORS, MLStatus, MLProductC
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
+import { mlSearch } from '@/lib/ml-search-client';
+import { SeiqBadge, CATEGORIES as SEIQ_CATEGORIES } from '@/components/shared/seiq-import-modal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -52,6 +54,7 @@ interface Product {
   stock: number;
   supplierPrice?: number | null;
   supplierCode?: string | null;
+  seiqCategory?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -344,7 +347,7 @@ function Row({ label, value, strong, mono }: {
 // PRODUCT INSPECTOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, onHide, supplierNames = [] }: {
+function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, onHide, onUnhide, supplierNames = [] }: {
   product: Product;
   onClose: () => void;
   odooUrl?: string;
@@ -352,6 +355,7 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
   onUpdate?: (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string }) => void;
   onDelete?: (id: string) => void;
   onHide?: (id: string) => void;
+  onUnhide?: (id: string) => void;
   supplierNames?: string[];
 }) {
   const [showMarket,   setShowMarket]   = useState(false);
@@ -375,20 +379,15 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
     setMlResults(null);
     try {
       const q = p.name.replace(/['"]/g, '').slice(0, 80);
-      const res = await fetch(`/api/ml-search?q=${encodeURIComponent(q)}&limit=3`);
-      const data = await res.json() as {
-        ok?: boolean;
-        items?: Array<{ id: string; title: string; price: number; permalink: string; soldQty: number; seller: string | null; thumbnail: string | null }>;
-        results?: Array<{ id: string; title: string; price: number; url: string; sold: number; seller: string; thumb: string | null }>;
-      };
-      if (data.items) {
-        setMlResults(data.items.slice(0, 3).map(r => ({
+      const result = await mlSearch(q, 3);
+      if (result.ok) {
+        setMlResults(result.items.slice(0, 3).map(r => ({
           id: r.id, title: r.title, price: r.price,
           sold: r.soldQty, url: r.permalink,
           seller: r.seller ?? '', thumb: r.thumbnail ?? null,
         })));
       } else {
-        setMlResults(data.results ?? []);
+        setMlResults([]);
       }
     } catch {
       setMlResults([]);
@@ -1406,8 +1405,16 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
             <span className="font-black text-base">{p.stock ?? 0} u.</span>
           </div>
 
-          {/* Ocultar (soft-hide) */}
-          {onHide && (
+          {/* Ocultar / Reactivar (soft-hide) */}
+          {p.hidden && onUnhide ? (
+            <button
+              onClick={() => onUnhide(p.id)}
+              className="flex items-center gap-1.5 text-[11px] text-[#16A34A] hover:text-[#15803D] transition-colors w-full justify-center py-2 rounded-xl hover:bg-[#16A34A]/5 border border-transparent hover:border-[#16A34A]/20"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Reactivar producto
+            </button>
+          ) : onHide && !p.hidden && (
             <button
               onClick={() => onHide(p.id)}
               className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-[#714B67] transition-colors w-full justify-center py-2 rounded-xl hover:bg-[#714B67]/5 border border-transparent hover:border-[#714B67]/15"
@@ -1539,6 +1546,7 @@ export default function ProductosPage() {
   const [category,      setCategory]      = useState('Todas');
   const [supplier,      setSupplier]      = useState('Todos');
   const [statusFilter,  setStatusFilter]  = useState('todos');
+  const [seiqFilter,    setSeiqFilter]    = useState<string>('Todos');
   const [view,          setView]          = useState<'lista' | 'grid'>('lista');
   const [page,          setPage]          = useState(1);
   const PER_PAGE = 50;
@@ -1622,6 +1630,8 @@ export default function ProductosPage() {
   const [deletedIds,  setDeletedIds]  = useState<Set<string>>(new Set());
   // ── Ocultos localmente (sin eliminar) ──
   const [hiddenIds,   setHiddenIds]   = useState<Set<string>>(new Set());
+  // ── Reactivados localmente (override p.hidden === true del JSON) ──
+  const [unhiddenIds, setUnhiddenIds] = useState<Set<string>>(new Set());
   // ── Mostrar productos ocultos/archivados ──
   const [showHidden,  setShowHidden]  = useState(false);
   // ── Sync stock ──
@@ -1654,6 +1664,26 @@ export default function ProductosPage() {
     setSelected(null);
   };
 
+  // ── Delete rápido desde la fila ──
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const quickDelete = async (id: string, name: string) => {
+    if (!window.confirm(`¿Eliminar "${name.slice(0, 50)}" permanentemente?\n\nEsta acción no se puede deshacer.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/products', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json() as { ok: boolean };
+      if (data.ok) handleDelete(id);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // ── Ocultar producto (soft-hide — no se elimina) ──
   const handleHide = async (id: string) => {
     try {
@@ -1664,6 +1694,22 @@ export default function ProductosPage() {
       });
     } catch { /* ignore */ }
     setHiddenIds(prev => new Set([...prev, id]));
+    setSelected(null);
+  };
+
+  // ── Reactivar producto (desarchiva) ──
+  const handleUnhide = async (id: string) => {
+    try {
+      await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, hidden: false }),
+      });
+    } catch { /* ignore */ }
+    // Quitar de hiddenIds (por si fue ocultado en esta sesión)
+    setHiddenIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+    // Marcar como reactivado (override del hidden:true que viene del JSON)
+    setUnhiddenIds(prev => new Set([...prev, id]));
     setSelected(null);
   };
 
@@ -1788,7 +1834,8 @@ export default function ProductosPage() {
     return products.filter(p => {
       if (deletedIds.has(p.id)) return false;
       // Ocultos: filtrar siempre salvo que showHidden esté activo
-      if (!showHidden && (p.hidden || hiddenIds.has(p.id))) return false;
+      const isHidden = (p.hidden || hiddenIds.has(p.id)) && !unhiddenIds.has(p.id);
+      if (!showHidden && isHidden) return false;
       const active = isActive(p);
       // Filtro de inactivos: si se pide 'inactivo' solo muestra inactivos;
       // si se pide 'todos' o cualquier otro filtro, muestra solo activos
@@ -1804,6 +1851,7 @@ export default function ProductosPage() {
         || (p.supCode    || '').toLowerCase().includes(q);
       const matchCat    = category     === 'Todas' || (p.category    || 'Sin categoría').startsWith(category);
       const matchSup    = supplier     === 'Todos' || (p.supplierName || 'Sin proveedor') === supplier;
+      const matchSeiq   = seiqFilter   === 'Todos' || p.seiqCategory === seiqFilter;
       const matchStatus =
         statusFilter === 'todos'    ||
         p.status === statusFilter   ||
@@ -1815,10 +1863,10 @@ export default function ProductosPage() {
         (statusFilter === 'con_stock'  && (p.stock ?? 0) > 0) ||
         (statusFilter === 'sin_stock'  && (p.stock ?? 0) === 0) ||
         (statusFilter === 'bajo_stock' && (p.stock ?? 0) > 0 && (p.stock ?? 0) <= 3);
-      return matchSearch && matchCat && matchSup && matchStatus;
+      return matchSearch && matchCat && matchSup && matchSeiq && matchStatus;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, category, supplier, statusFilter, deletedIds, hiddenIds, showHidden, mlLabMap]);
+  }, [search, category, supplier, seiqFilter, statusFilter, deletedIds, hiddenIds, unhiddenIds, showHidden, mlLabMap]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paginated  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -2020,13 +2068,34 @@ export default function ProductosPage() {
               <div className="relative">
                 <select
                   value={supplier}
-                  onChange={e => { setSupplier(e.target.value); setPage(1); }}
+                  onChange={e => { setSupplier(e.target.value); setPage(1); if (e.target.value !== 'SEIQ GROUP S.A.') setSeiqFilter('Todos'); }}
                   className="appearance-none pl-3 pr-8 py-2.5 bg-white border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#0784F2]/30 cursor-pointer max-w-[200px]"
                 >
                   {allSuppliers.map(s => <option key={s}>{s}</option>)}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               </div>
+
+              {/* SEIQ category filter — only shown when SEIQ supplier is selected OR seiqFilter is active */}
+              {(supplier === 'SEIQ GROUP S.A.' || seiqFilter !== 'Todos') && (
+                <div className="flex gap-1 items-center shrink-0">
+                  <span className="text-[11px] font-semibold text-blue-600 hidden sm:block">SEIQ:</span>
+                  {(['Todos', ...SEIQ_CATEGORIES] as string[]).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => { setSeiqFilter(cat); setPage(1); }}
+                      className={cn(
+                        'px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border transition-all',
+                        seiqFilter === cat
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+                      )}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Status */}
               <div className="flex bg-white border border-gray-200 rounded-xl overflow-hidden shrink-0">
@@ -2240,7 +2309,7 @@ export default function ProductosPage() {
                                   )}>
                                     {p.name}
                                   </p>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                     <p className="text-[10px] text-gray-400">
                                       {p.uom}{p.tag && ` · ${p.tag}`}
                                     </p>
@@ -2249,6 +2318,7 @@ export default function ProductosPage() {
                                         ML
                                       </span>
                                     )}
+                                    {p.seiqCategory && <SeiqBadge category={p.seiqCategory} />}
                                   </div>
                                 </div>
                               </div>
@@ -2382,6 +2452,19 @@ export default function ProductosPage() {
                                 {isActive(p) ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                               </button>
                             </td>
+                            {/* Delete rápido */}
+                            <td className="px-1 py-2.5 text-center"
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                onClick={() => quickDelete(p.id, p.name)}
+                                disabled={deleting}
+                                title="Eliminar producto"
+                                className="w-6 h-6 flex items-center justify-center rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all disabled:opacity-30"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -2400,8 +2483,8 @@ export default function ProductosPage() {
                 <div className={cn(
                   'grid gap-3',
                   inspectorOpen
-                    ? 'grid-cols-2 sm:grid-cols-3'
-                    : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
+                    ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+                    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
                 )}>
                   {paginated.map(p => {
                     const mb2 = marginBadge(p.margin);
@@ -2410,77 +2493,128 @@ export default function ProductosPage() {
                     const inactive = !isActive(p);
                     const mlLabGrid = getMLLabInfo(p);
                     const inPricelist = isInMLPricelist(p);
+
+                    // Accent color strip based on margin health
+                    const accentCls =
+                      !p.cost || p.cost === 0 ? 'bg-gray-200' :
+                      p.margin === null        ? 'bg-gray-200' :
+                      p.margin >= 55           ? 'bg-[#16A34A]' :
+                      p.margin >= 45           ? 'bg-[#4ADE80]' :
+                      p.margin >= 35           ? 'bg-[#F97316]' :
+                                                  'bg-[#EF4444]';
+
+                    // Category short label
+                    const catShort = p.category
+                      ? p.category.split(' / ').slice(-1)[0]
+                      : null;
+
                     return (
                       <div
                         key={p.id}
                         onClick={() => setSelected(isSelected ? null : p)}
                         className={cn(
-                          'bg-white rounded-2xl border overflow-hidden hover:shadow-md transition-all cursor-pointer',
+                          'bg-white rounded-2xl border overflow-hidden transition-all cursor-pointer group',
                           inactive
-                            ? 'opacity-45 border-gray-100'
+                            ? 'opacity-40 border-gray-100'
                             : isSelected
-                              ? 'border-[#0784F2]/40 shadow-md ring-2 ring-[#0784F2]/20'
-                              : 'border-gray-100 hover:border-gray-200',
+                              ? 'border-[#0784F2]/40 shadow-lg ring-2 ring-[#0784F2]/20'
+                              : 'border-gray-100 hover:border-gray-300 hover:shadow-md',
                         )}
                       >
-                        <div className="h-28 bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center relative overflow-hidden">
-                          {getImg(p)
-                            // eslint-disable-next-line @next/next/no-img-element
-                            ? <img src={getImg(p)!} alt={p.name} className="w-full h-full object-contain p-2" />
-                            : <ImageIcon className="w-10 h-10 text-gray-400" />}
-                          <span className={cn(
-                            'absolute top-2 right-2 whitespace-nowrap px-1.5 py-0.5 rounded-full text-[9px] font-semibold',
-                            sb.cls,
-                          )}>
-                            {sb.label}
-                          </span>
-                          {p.isFavorite && (
-                            <span className="absolute top-2 left-2 text-[#F97316] text-[10px]">★</span>
-                          )}
-                          {(inPricelist || mlLabGrid) && (
-                            <span className={cn(
-                              'absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded text-[8px] font-black leading-none shadow-sm',
-                              mlLabGrid
-                                ? 'bg-[#FFE600] text-[#07111F]'
-                                : 'bg-[#0784F2]/15 text-[#0784F2] border border-[#0784F2]/30',
-                            )}>
-                              {mlLabGrid ? 'ML ✓' : 'En ML'}
-                            </span>
-                          )}
-                        </div>
-                        <div className="p-3">
-                          <p className="text-[11px] font-semibold text-[#07111F] line-clamp-2 leading-tight mb-1">
-                            {p.name}
-                          </p>
-                          {p.sku && (
-                            <p className="text-[9px] font-mono text-gray-400 mb-2">{p.sku}</p>
-                          )}
-                          <div className="flex items-end justify-between">
-                            <div>
-                              <div className="text-[10px] text-gray-400">
-                                {p.cost > 0 ? formatARS(p.cost) : '—'}
-                              </div>
-                              <div className="text-[13px] font-bold text-[#07111F]">
-                                {p.price > 1 ? formatARS(p.price) : '—'}
+                        {/* ── Top accent bar (margin health) ── */}
+                        <div className={cn('h-1 w-full shrink-0', accentCls)} />
+
+                        <div className="p-4">
+
+                          {/* ── Row 1: Name + ML badge ── */}
+                          <div className="flex items-start justify-between gap-2 mb-3">
+                            <div className="min-w-0 flex-1">
+                              <p className={cn(
+                                'text-[13px] font-bold leading-snug line-clamp-2 mb-1',
+                                isSelected ? 'text-[#0784F2]' : 'text-[#07111F]',
+                              )}>
+                                {p.isFavorite && <span className="text-[#F97316] mr-1">★</span>}
+                                {p.name}
+                              </p>
+                              {/* Identity row */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {p.sku && (
+                                  <span className="text-[9px] font-mono text-gray-500 bg-gray-100 px-1.5 py-px rounded">
+                                    {p.sku}
+                                  </span>
+                                )}
+                                {catShort && (
+                                  <span className="text-[9px] text-gray-400 truncate max-w-[100px]">
+                                    {catShort}
+                                  </span>
+                                )}
                               </div>
                             </div>
-                            <span className={cn(
-                              'text-[12px] font-bold px-1.5 py-0.5 rounded-lg',
-                              mb2.bg,
-                            )}>
-                              {mb2.text}
-                            </span>
+
+                            {/* Right badges */}
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              {(inPricelist || mlLabGrid) && (
+                                <span className={cn(
+                                  'px-1.5 py-0.5 rounded text-[8px] font-black leading-none',
+                                  mlLabGrid
+                                    ? 'bg-[#FFE600] text-[#07111F]'
+                                    : 'bg-[#0784F2]/12 text-[#0784F2] border border-[#0784F2]/25',
+                                )}>
+                                  {mlLabGrid ? 'ML ✓' : 'ML'}
+                                </span>
+                              )}
+                              <span className={cn(
+                                'text-[8px] font-bold px-1.5 py-px rounded-full',
+                                sb.cls,
+                              )}>
+                                {sb.label}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex items-center justify-between mt-1.5">
-                            {p.supplierName && (
-                              <p className="text-[9px] text-gray-400 truncate">{p.supplierName}</p>
-                            )}
+
+                          {/* ── Data grid: 3 cols ── */}
+                          <div className="grid grid-cols-3 divide-x divide-gray-100 bg-gray-50/80 rounded-xl overflow-hidden border border-gray-100 mb-3">
+                            <div className="px-2.5 py-2 text-center">
+                              <p className="text-[8px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Costo</p>
+                              <p className="text-[11px] font-bold text-gray-600 tabular-nums">
+                                {p.cost > 0 ? formatARS(p.cost) : <span className="text-gray-300">—</span>}
+                              </p>
+                            </div>
+                            <div className="px-2.5 py-2 text-center">
+                              <p className="text-[8px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Lista A</p>
+                              <p className="text-[12px] font-black text-gray-900 tabular-nums">
+                                {p.price > 1 ? formatARS(p.price) : <span className="text-gray-300">—</span>}
+                              </p>
+                            </div>
+                            <div className="px-2.5 py-2 text-center">
+                              <p className="text-[8px] font-semibold text-gray-400 uppercase tracking-wide mb-0.5">Margen</p>
+                              <span className={cn(
+                                'inline-block text-[11px] font-black px-1.5 py-px rounded-md tabular-nums',
+                                mb2.bg,
+                              )}>
+                                {mb2.text}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* ── Footer: supplier + stock ── */}
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[9px] text-gray-400 truncate flex-1">
+                              {p.supplierName ?? 'Sin proveedor'}
+                            </p>
                             {(p.stock ?? 0) > 0 ? (
-                              <span className="text-[8px] font-black text-[#16A34A] bg-[#16A34A]/10 px-1.5 py-0.5 rounded shrink-0">
+                              <span className={cn(
+                                'text-[9px] font-black px-2 py-0.5 rounded-full shrink-0',
+                                (p.stock ?? 0) <= 3
+                                  ? 'bg-[#F97316]/10 text-[#F97316]'
+                                  : 'bg-[#16A34A]/10 text-[#16A34A]',
+                              )}>
                                 {p.stock} u.
                               </span>
                             ) : (
-                              <span className="text-[8px] font-semibold text-gray-300 shrink-0">0 u.</span>
+                              <span className="text-[9px] font-semibold text-gray-300 shrink-0 bg-gray-50 px-2 py-0.5 rounded-full border border-gray-100">
+                                Sin stock
+                              </span>
                             )}
                           </div>
                         </div>
@@ -2522,6 +2656,7 @@ export default function ProductosPage() {
                     setCategory('Todas');
                     setSupplier('Todos');
                     setStatusFilter('todos');
+                    setSeiqFilter('Todos');
                   }}
                   className="mt-4 px-4 py-2 bg-[#0784F2] text-white text-[12px] font-semibold rounded-lg hover:opacity-90"
                 >
@@ -2535,7 +2670,7 @@ export default function ProductosPage() {
           {inspectorOpen && (
             <div className="hidden lg:block">
               <div className="sticky top-4">
-                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} supplierNames={supplierNameOptions} />}
+                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />}
               </div>
             </div>
           )}
@@ -2545,7 +2680,7 @@ export default function ProductosPage() {
         {/* Inspector mobile (debajo de la lista) */}
         {inspectorOpen && (
           <div className="lg:hidden mt-5">
-            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} supplierNames={supplierNameOptions} />
+            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />
           </div>
         )}
 

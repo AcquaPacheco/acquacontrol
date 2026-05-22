@@ -1,7 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import productsData from '@/data/products.json';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import odooSupData from '@/data/odoo-supplierinfo.json';
 import { cn } from '@/lib/utils';
 import {
@@ -23,9 +22,8 @@ interface SupplierRow {
   sup_name: string | null; price: number; discount: number; net_price: number;
 }
 
-// ─── Data real ────────────────────────────────────────────────────────────────
-const products = productsData as unknown as RealProduct[];
-const odooSup  = odooSupData  as unknown as Array<{ name: string; slug: string; products: SupplierRow[] }>;
+// ─── Data estática (supplierinfo no cambia en esta sesión) ───────────────────
+const odooSup = odooSupData as unknown as Array<{ name: string; slug: string; products: SupplierRow[] }>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -74,6 +72,26 @@ function downloadCSV(content: string, filename: string) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ExportOdooPage() {
   const [activeExport, setActiveExport] = useState<'product' | 'supplierinfo'>('product');
+  const [products,     setProducts]     = useState<RealProduct[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [lastFetch,    setLastFetch]    = useState<string | null>(null);
+
+  // Carga en vivo desde /api/products para reflejar edits inline sin reiniciar el server
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/products');
+      const data = await res.json() as RealProduct[];
+      setProducts(Array.isArray(data) ? data.filter(p => p.active !== false && !(p as {hidden?:boolean}).hidden) : []);
+      setLastFetch(new Date().toLocaleTimeString('es-AR'));
+    } catch {
+      // fallback silencioso
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadProducts(); }, [loadProducts]);
 
   // Classify products
   const { exportable, issues, noOdoo } = useMemo(() => {
@@ -87,7 +105,7 @@ export default function ExportOdooPage() {
       exportable.push(p);
     }
     return { exportable, issues, noOdoo };
-  }, []);
+  }, [products]);
 
   // All supplier rows (from odoo-supplierinfo.json)
   const supplierRows = useMemo(() =>
@@ -110,20 +128,37 @@ export default function ExportOdooPage() {
 
       {/* Header */}
       <div className="px-4 lg:px-8 pt-6 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg odoo-gradient flex items-center justify-center">
-            <FileSpreadsheet className="w-5 h-5 text-white" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg odoo-gradient flex items-center justify-center">
+              <FileSpreadsheet className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Export Odoo</h1>
+              <p className="text-sm text-gray-500">Zona de salida — genera los CSVs para importar en Odoo</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Export Odoo</h1>
-            <p className="text-sm text-gray-500">Zona de salida — genera los CSVs para importar en Odoo</p>
+          <div className="flex items-center gap-3">
+            {lastFetch && (
+              <span className="text-xs text-gray-400">
+                Actualizado: <span className="font-medium text-gray-600">{lastFetch}</span>
+              </span>
+            )}
+            <button
+              onClick={loadProducts}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-all"
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+              {loading ? 'Cargando…' : 'Refrescar'}
+            </button>
           </div>
         </div>
       </div>
 
       {/* Stats reales */}
       <div className="px-4 lg:px-8">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={cn('grid grid-cols-2 lg:grid-cols-4 gap-3', loading && 'opacity-60 pointer-events-none')}>
           <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3">
             <CheckCircle2 className="w-8 h-8 text-success shrink-0" />
             <div>

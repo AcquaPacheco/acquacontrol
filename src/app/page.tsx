@@ -7,7 +7,7 @@ import {
   CheckCircle2, ArrowRight, ChevronRight,
   DollarSign, TrendingDown, AlertTriangle,
   XCircle, Lightbulb, Circle,
-  Key, RefreshCw, ShoppingCart, Tag, Lock,
+  Key, RefreshCw, ShoppingCart, Tag, Lock, FileText,
 } from 'lucide-react';
 import Link from 'next/link';
 import productsData    from '@/data/products.json';
@@ -268,9 +268,10 @@ function Dashboard({ s }: { s: ReturnType<typeof useSteps> }) {
             { label: 'Productos',     icon: Package,         href: '/productos',    sub: `${s.totalProducts} productos` },
             { label: 'Costos',        icon: DollarSign,      href: '/costos',       sub: `${s.sinCosto} sin costo` },
             { label: 'Rentabilidad',  icon: TrendingDown,    href: '/rentabilidad', sub: `${s.margenCritico} críticos` },
-            { label: 'ML Lab',        icon: ShoppingCart,    href: '/mercadolibre', sub: 'Análisis MercadoLibre' },
-            { label: 'Export Odoo',   icon: FileSpreadsheet, href: '/export-odoo',  sub: 'Exportar a Odoo' },
-            { label: 'Parámetros',    icon: Settings,        href: '/parametros',   sub: 'Configuración' },
+            { label: 'ML Lab',        icon: ShoppingCart,    href: '/mercadolibre',   sub: 'Análisis MercadoLibre' },
+            { label: 'Lista Precios', icon: FileText,        href: '/lista-precios',  sub: 'Efectivo · Débito · Tarjeta' },
+            { label: 'Export Odoo',   icon: FileSpreadsheet, href: '/export-odoo',    sub: 'Exportar a Odoo' },
+            { label: 'Parámetros',    icon: Settings,        href: '/parametros',     sub: 'Configuración' },
           ].map((m, i) => {
             const Icon = m.icon;
             return (

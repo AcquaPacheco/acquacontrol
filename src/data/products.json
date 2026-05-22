@@ -459,9 +459,9 @@
     "id": "__export__.product_template_2455_731e56ad",
     "sku": "V-102006",
     "name": "Boya Dosificadora de Cloro c/termometro - Colors - Vulcano",
-    "cost": 0,
+    "cost": 9216,
     "price": 15460,
-    "margin": null,
+    "margin": 40.4,
     "image": null,
     "supplierName": "VULCANO S.A.",
     "supplierPrice": 10905.6,
@@ -472,7 +472,8 @@
     "stock": 0,
     "barcode": "BVL-Vul",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "markup": 67.8
   },
   {
     "id": "__export__.product_template_2456_7b0464f6",
@@ -583,7 +584,7 @@
     "category": "Pileta / Accesorios de Pileta",
     "status": "activo",
     "odooId": 2479,
-    "stock": 6,
+    "stock": 4,
     "barcode": "23936A",
     "active": true,
     "hidden": false
@@ -640,7 +641,7 @@
     "category": "Pileta / Accesorios de Pileta",
     "status": "activo",
     "odooId": 2491,
-    "stock": 18,
+    "stock": 17,
     "barcode": "CURVOVUL",
     "active": true,
     "hidden": false
@@ -1286,7 +1287,7 @@
     "category": "Jardín / Artículos de Jardín",
     "status": "activo",
     "odooId": 3444,
-    "stock": 136,
+    "stock": 135,
     "barcode": "00001257",
     "active": true,
     "hidden": false
@@ -1517,7 +1518,8 @@
     "stock": 25,
     "barcode": "7798270221470",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_1502_bb7a39e7",
@@ -1726,7 +1728,8 @@
     "stock": 10,
     "barcode": "7798270221517",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_10903_0b6dbe2b",
@@ -1742,7 +1745,7 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 10903,
-    "stock": -1,
+    "stock": 0,
     "barcode": "0737876719278",
     "active": true,
     "hidden": false
@@ -1802,7 +1805,8 @@
     "stock": 0,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_1516_495e7774",
@@ -1858,7 +1862,7 @@
     "odooId": 12738,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -1877,7 +1881,7 @@
     "odooId": 12737,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -2027,7 +2031,7 @@
     "category": "Perfumería",
     "status": "activo",
     "odooId": 1528,
-    "stock": 6,
+    "stock": 5,
     "barcode": "7798184680462",
     "active": true,
     "hidden": false
@@ -2752,7 +2756,8 @@
     "stock": 0,
     "barcode": "7798270221586",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_1554_444af33e",
@@ -2771,7 +2776,8 @@
     "stock": 0,
     "barcode": "7798270221616",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_1555_1d00694c",
@@ -2790,7 +2796,8 @@
     "stock": 0,
     "barcode": "7798270221609",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_1556_8ea8bfa2",
@@ -2809,7 +2816,8 @@
     "stock": 0,
     "barcode": "7798270221593",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_10844_65da5623",
@@ -2977,7 +2985,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 3897,
-    "stock": 30,
+    "stock": 29,
     "barcode": "7798028558018",
     "active": true,
     "hidden": false
@@ -3227,7 +3235,8 @@
     "stock": 12,
     "barcode": "7798270221548",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_1574_a5064a69",
@@ -3643,7 +3652,7 @@
     "category": "Jardín / Artículos de Jardín",
     "status": "activo",
     "odooId": 2410,
-    "stock": 3,
+    "stock": 2,
     "barcode": "7798061891080",
     "active": true,
     "hidden": false
@@ -3721,7 +3730,7 @@
     "odooId": 12727,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -3759,7 +3768,7 @@
     "odooId": 12729,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -3833,7 +3842,7 @@
     "category": "Limpieza / Cuidado para la Ropa",
     "status": "activo",
     "odooId": 10928,
-    "stock": -1,
+    "stock": 0,
     "barcode": "731000523",
     "active": true,
     "hidden": false
@@ -3985,7 +3994,7 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 2431,
-    "stock": -1,
+    "stock": 0,
     "barcode": "7790520995612",
     "active": true,
     "hidden": false
@@ -4061,7 +4070,7 @@
     "category": "Jardín / Leña & Carbón",
     "status": "activo",
     "odooId": 12700,
-    "stock": 36,
+    "stock": 32,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -4118,7 +4127,7 @@
     "category": "Jardín / Leña & Carbón",
     "status": "activo",
     "odooId": 3110,
-    "stock": 13,
+    "stock": 12,
     "barcode": "943000000",
     "active": true,
     "hidden": false
@@ -4156,7 +4165,7 @@
     "category": "Jardín / Leña & Carbón",
     "status": "activo",
     "odooId": 10951,
-    "stock": 9,
+    "stock": 8,
     "barcode": "FYA-QC10KG",
     "active": true,
     "hidden": false
@@ -4270,7 +4279,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 2435,
-    "stock": 302,
+    "stock": 299,
     "barcode": "754697461247",
     "active": true,
     "hidden": false
@@ -4289,7 +4298,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 2436,
-    "stock": 149,
+    "stock": 147,
     "barcode": "754697461223",
     "active": true,
     "hidden": false
@@ -4308,7 +4317,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 2437,
-    "stock": 67,
+    "stock": 66,
     "barcode": "754697461230",
     "active": true,
     "hidden": false
@@ -4595,7 +4604,7 @@
     "odooId": 12733,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -4748,7 +4757,8 @@
     "stock": 3,
     "barcode": "SE1L-262120",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2463_89b56804",
@@ -4767,7 +4777,8 @@
     "stock": 4,
     "barcode": "SE5L-262120",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2464_17dade04",
@@ -4916,7 +4927,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 2468,
-    "stock": 34,
+    "stock": 33,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -5127,7 +5138,7 @@
     "odooId": 12735,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -5450,7 +5461,7 @@
     "odooId": 12732,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -5583,7 +5594,7 @@
     "odooId": 12726,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -5774,7 +5785,8 @@
     "stock": 0,
     "barcode": "796",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10849_8fcb2549",
@@ -5793,7 +5805,8 @@
     "stock": 3,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10850_96742f12",
@@ -5812,7 +5825,8 @@
     "stock": 2,
     "barcode": "798",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2509_765a6d65",
@@ -5869,7 +5883,8 @@
     "stock": 0,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_2511_3fc27ed2",
@@ -6436,7 +6451,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 2531,
-    "stock": 14,
+    "stock": 8,
     "barcode": "CL-GDL",
     "active": true,
     "hidden": false
@@ -6455,7 +6470,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 2532,
-    "stock": 10,
+    "stock": 5,
     "barcode": "CL-GDR",
     "active": true,
     "hidden": false
@@ -6474,7 +6489,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 1489,
-    "stock": 1415,
+    "stock": 1410,
     "barcode": "CL-LIQXL",
     "active": true,
     "hidden": false
@@ -6629,7 +6644,8 @@
     "stock": 11,
     "barcode": "7798270222088",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_12676_47e654b3",
@@ -6648,7 +6664,8 @@
     "stock": 10,
     "barcode": "7798270222064",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_12675_f9078fe6",
@@ -6667,7 +6684,8 @@
     "stock": 12,
     "barcode": "7798270222071",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_12593_b63f2b4a",
@@ -6797,7 +6815,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 12748,
-    "stock": -1.12,
+    "stock": 0,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -6835,7 +6853,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 10935,
-    "stock": 7,
+    "stock": 6,
     "barcode": "AP-TA50",
     "active": true,
     "hidden": false
@@ -6990,7 +7008,8 @@
     "stock": 102,
     "barcode": "7798270220084",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_12872_801e7cda",
@@ -7009,7 +7028,8 @@
     "stock": 4,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2545_ebe7483d",
@@ -7028,7 +7048,8 @@
     "stock": 14,
     "barcode": "7798270220077",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2546_621f476d",
@@ -7047,7 +7068,8 @@
     "stock": 111,
     "barcode": "7798270220022",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2547_c5e95d3c",
@@ -7063,10 +7085,11 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 2547,
-    "stock": 94,
+    "stock": 93,
     "barcode": "7798270220893",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2548_03448e91",
@@ -7085,7 +7108,8 @@
     "stock": 67,
     "barcode": "7798270220046",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2549_4f6173b0",
@@ -7101,10 +7125,11 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 2549,
-    "stock": 72,
+    "stock": 71,
     "barcode": "7798270220039",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2550_427c612f",
@@ -7123,7 +7148,8 @@
     "stock": 51,
     "barcode": "7798270220060",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2551_92cdfd41",
@@ -7142,7 +7168,8 @@
     "stock": 89,
     "barcode": "7798270220053",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_2552_1c3d7059",
@@ -7218,7 +7245,8 @@
     "stock": 12,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_10821_a2cb3242",
@@ -7256,7 +7284,8 @@
     "stock": 2,
     "barcode": "1472000000",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_12865_b4a66dd7",
@@ -7272,7 +7301,7 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 12865,
-    "stock": -6,
+    "stock": 0,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -7291,7 +7320,7 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 12595,
-    "stock": -3,
+    "stock": 0,
     "barcode": "ACQ-DETLIM1LT",
     "active": true,
     "hidden": false
@@ -7427,7 +7456,8 @@
     "stock": 2,
     "barcode": "845",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2557_18676d06",
@@ -7975,7 +8005,7 @@
     "category": "Perfumería",
     "status": "activo",
     "odooId": 12816,
-    "stock": 6,
+    "stock": 5,
     "barcode": "7798184681018",
     "active": true,
     "hidden": false
@@ -8109,9 +8139,9 @@
     "category": "All",
     "status": "sin_costo",
     "odooId": 12123,
-    "stock": 900,
+    "stock": 850,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -8299,7 +8329,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 12711,
-    "stock": -2,
+    "stock": 0,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -8432,7 +8462,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 2589,
-    "stock": 19,
+    "stock": 18,
     "barcode": "7798059380145",
     "active": true,
     "hidden": false
@@ -8546,7 +8576,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 12706,
-    "stock": 3,
+    "stock": 1,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -8565,7 +8595,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 2594,
-    "stock": -1,
+    "stock": 0,
     "barcode": "7798092963282",
     "active": true,
     "hidden": false
@@ -8644,7 +8674,8 @@
     "stock": 4,
     "barcode": "1477000000",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_2598_7fd5c787",
@@ -8663,7 +8694,8 @@
     "stock": 8,
     "barcode": "7798270221463",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_12871_78a7ef2b",
@@ -8700,7 +8732,7 @@
     "odooId": 12730,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -10257,7 +10289,7 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 3073,
-    "stock": 37,
+    "stock": 36,
     "barcode": "7796311000022",
     "active": true,
     "hidden": false
@@ -10276,7 +10308,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 10894,
-    "stock": -1,
+    "stock": 0,
     "barcode": "213145678842",
     "active": true,
     "hidden": false
@@ -10927,7 +10959,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 12845,
-    "stock": 5,
+    "stock": 4,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -11006,7 +11038,8 @@
     "stock": 138,
     "barcode": "7798270220015",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_3103_216b1eb5",
@@ -11139,7 +11172,8 @@
     "stock": 34,
     "barcode": "7798270221494",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_10746_17e36f7d",
@@ -11177,7 +11211,8 @@
     "stock": 16,
     "barcode": "7798270221456",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_3116_5ec703e8",
@@ -11196,7 +11231,8 @@
     "stock": 70,
     "barcode": "7798010000105",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Sobres"
   },
   {
     "id": "__export__.product_template_3117_1c2e74a0",
@@ -11253,7 +11289,8 @@
     "stock": 12,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_10899_a1b57c57",
@@ -11272,7 +11309,8 @@
     "stock": 1.6,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10735_1e053aae",
@@ -11307,10 +11345,11 @@
     "category": "Limpieza / Productos de Limpieza",
     "status": "activo",
     "odooId": 3124,
-    "stock": 20,
+    "stock": 19,
     "barcode": "7798270221487",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_2429_266b133b",
@@ -12048,7 +12087,7 @@
     "category": "Perfumería",
     "status": "activo",
     "odooId": 3147,
-    "stock": 7,
+    "stock": 6,
     "barcode": "7798184682701",
     "active": true,
     "hidden": false
@@ -12694,7 +12733,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 3168,
-    "stock": -1,
+    "stock": 0,
     "barcode": "7793344009190",
     "active": true,
     "hidden": false
@@ -12713,7 +12752,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 3169,
-    "stock": 8,
+    "stock": 7,
     "barcode": "7793344904396",
     "active": true,
     "hidden": false
@@ -12887,7 +12926,8 @@
     "stock": 12,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_3174_ec458f67",
@@ -12903,7 +12943,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 3174,
-    "stock": -1,
+    "stock": 0,
     "barcode": "7798061894036",
     "active": true,
     "hidden": false
@@ -13001,7 +13041,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 1492,
-    "stock": 11,
+    "stock": 46,
     "barcode": "1007000000",
     "active": true,
     "hidden": false
@@ -13191,7 +13231,7 @@
     "category": "Limpieza / Cuidado para la Ropa",
     "status": "activo",
     "odooId": 3179,
-    "stock": -7,
+    "stock": 0,
     "barcode": "727373124590",
     "active": true,
     "hidden": false
@@ -14160,7 +14200,7 @@
     "category": "Perfumería",
     "status": "activo",
     "odooId": 3211,
-    "stock": 4,
+    "stock": 3,
     "barcode": "7798184680127",
     "active": true,
     "hidden": false
@@ -14217,7 +14257,7 @@
     "category": "Perfumería",
     "status": "activo",
     "odooId": 12805,
-    "stock": 4,
+    "stock": 3,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -14616,7 +14656,7 @@
     "category": "Jardín / Leña & Carbón",
     "status": "activo",
     "odooId": 3226,
-    "stock": 86,
+    "stock": 85,
     "barcode": "656750803936",
     "active": true,
     "hidden": false
@@ -14768,7 +14808,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 12870,
-    "stock": 26,
+    "stock": 25,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -14790,7 +14830,8 @@
     "stock": 16,
     "barcode": "7798270222163",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_3373_0235e60c",
@@ -15262,7 +15303,7 @@
     "category": "Limpieza / Cuidado para la Ropa",
     "status": "activo",
     "odooId": 12862,
-    "stock": -1,
+    "stock": 0,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -15452,7 +15493,7 @@
     "category": "Pileta / Mantenimiento de Pileta",
     "status": "activo",
     "odooId": 10971,
-    "stock": 13,
+    "stock": 89,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -15547,7 +15588,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 3397,
-    "stock": 19,
+    "stock": 17,
     "barcode": "7798061890502",
     "active": true,
     "hidden": false
@@ -15626,7 +15667,8 @@
     "stock": 12,
     "barcode": "7798270222149",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_3405_515b27b8",
@@ -15870,7 +15912,7 @@
     "category": "Limpieza / Artículos de Limpieza",
     "status": "activo",
     "odooId": 10808,
-    "stock": 6,
+    "stock": 4,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -16364,7 +16406,7 @@
     "category": "Papelera",
     "status": "activo",
     "odooId": 12765,
-    "stock": -1,
+    "stock": 0,
     "barcode": null,
     "active": true,
     "hidden": false
@@ -16497,7 +16539,7 @@
     "category": "Limpieza / Limpieza Automotor",
     "status": "activo",
     "odooId": 12613,
-    "stock": 8,
+    "stock": 7,
     "barcode": "7798184682404",
     "active": true,
     "hidden": false
@@ -16651,7 +16693,7 @@
     "odooId": 12728,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -16670,7 +16712,7 @@
     "odooId": 12734,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -16689,7 +16731,7 @@
     "odooId": 12736,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -16975,7 +17017,8 @@
     "stock": 16,
     "barcode": "7798270221449",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Aerosoles"
   },
   {
     "id": "__export__.product_template_12674_523b4217",
@@ -16994,7 +17037,8 @@
     "stock": 12,
     "barcode": "7798270222170",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Masivo"
   },
   {
     "id": "__export__.product_template_3454_4699b9cb",
@@ -17124,10 +17168,11 @@
     "category": "Limpieza / Limpieza Automotor",
     "status": "activo",
     "odooId": 10900,
-    "stock": -1,
+    "stock": 0,
     "barcode": "SE-CH140",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10872_4960a4d9",
@@ -17146,7 +17191,8 @@
     "stock": 1,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10901_a649f647",
@@ -17163,9 +17209,10 @@
     "status": "activo",
     "odooId": 10901,
     "stock": 0,
-    "barcode": null,
+    "barcode": "548578689",
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_10847_c1570f7c",
@@ -17184,7 +17231,8 @@
     "stock": 2,
     "barcode": null,
     "active": true,
-    "hidden": false
+    "hidden": false,
+    "seiqCategory": "Bidones"
   },
   {
     "id": "__export__.product_template_12758_0e6454bf",
@@ -17561,7 +17609,7 @@
     "category": "Limpieza / Cuidado para la Ropa",
     "status": "activo",
     "odooId": 12864,
-    "stock": -3,
+    "stock": 0,
     "barcode": "54866887452",
     "active": true,
     "hidden": false
@@ -17962,7 +18010,7 @@
     "odooId": 12731,
     "stock": 0,
     "barcode": null,
-    "active": true,
+    "active": false,
     "hidden": false
   },
   {
@@ -18549,7 +18597,7 @@
     "category": "Limpieza / Cuidado para la Ropa",
     "status": "activo",
     "odooId": 10898,
-    "stock": 35,
+    "stock": 34,
     "barcode": "BL-VL5LT",
     "active": true,
     "hidden": false

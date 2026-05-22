@@ -8,9 +8,16 @@ import {
   Calculator, Save, RotateCcw, Check, Plus, Trash2,
   ChevronRight, Info, TrendingUp, HardDrive, AlertTriangle,
   Upload, CheckCircle2, RefreshCw, FileSpreadsheet, X,
-  Globe, Link as LinkIcon,
+  Globe, Link as LinkIcon, ShoppingCart, Eye, EyeOff, ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 import { useSettings } from '@/lib/use-settings';
+import suppliersRaw from '@/data/suppliers.json';
+
+const SUPPLIER_NAMES: string[] = (suppliersRaw as unknown as { name: string }[])
+  .map(s => s.name)
+  .filter(Boolean)
+  .sort((a, b) => a.localeCompare(b, 'es'));
 
 // ── Tipos de datos
 interface DolarParams {
@@ -98,23 +105,23 @@ const DEFAULT_REDONDEO: RedondeoParams = {
   decimalesCostos: 2,
 };
 
-// ── Storage helpers
-const LS_KEY = 'acqua-parametros-v1';
-
-function loadParams() {
-  if (typeof window === 'undefined') return null;
+// ── Storage helpers — servidor (src/data/params.json) ────────────────────────
+async function loadParams(): Promise<Record<string, unknown>> {
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+    const res = await fetch('/api/params');
+    if (!res.ok) return {};
+    return await res.json() as Record<string, unknown>;
+  } catch { return {}; }
 }
 
-function saveParams(key: string, value: unknown) {
+async function saveParams(key: string, value: unknown): Promise<void> {
   try {
-    const all = loadParams() || {};
-    all[key] = value;
-    localStorage.setItem(LS_KEY, JSON.stringify(all));
-  } catch {}
+    await fetch('/api/params', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ [key]: value }),
+    });
+  } catch { /* no bloquear la UI si falla */ }
 }
 
 // ── Componentes de UI
@@ -195,8 +202,7 @@ function SeccionDolar() {
   const [bnaError, setBnaError] = useState('');
 
   useEffect(() => {
-    const stored = loadParams();
-    if (stored?.dolar) setData(stored.dolar);
+    loadParams().then(all => { if (all.dolar) setData(all.dolar as DolarParams); });
   }, []);
 
   const fetchBNA = async () => {
@@ -215,15 +221,15 @@ function SeccionDolar() {
     }
   };
 
-  const handleSave = () => {
-    saveParams('dolar', data);
+  const handleSave = async () => {
+    await saveParams('dolar', data);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setData(DEFAULT_DOLAR);
-    saveParams('dolar', DEFAULT_DOLAR);
+    await saveParams('dolar', DEFAULT_DOLAR);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -328,15 +334,21 @@ function SeccionDolar() {
             Agregar
           </button>
         </div>
+        {/* Datalist de proveedores disponibles */}
+        <datalist id="supplier-names-list">
+          {SUPPLIER_NAMES.map(n => <option key={n} value={n} />)}
+        </datalist>
+
         <div className="space-y-2">
           {data.porProveedor.map((p, i) => (
             <div key={i} className="flex items-center gap-3 bg-gray-50 rounded-lg px-4 py-2.5">
               <input
                 type="text"
+                list="supplier-names-list"
                 value={p.nombre}
                 onChange={e => updatePorProveedor(i, 'nombre', e.target.value)}
-                placeholder="Nombre del proveedor…"
-                className="flex-1 bg-transparent text-sm text-gray-700 focus:outline-none placeholder-gray-300"
+                placeholder="Seleccioná o escribí un proveedor…"
+                className="flex-1 bg-transparent text-sm text-gray-700 focus:outline-none placeholder-gray-300 min-w-0"
               />
               <NumericInput value={p.tasa} onChange={v => updatePorProveedor(i, 'tasa', v)} unit="ARS" step={0.5} />
               <button
@@ -366,19 +378,18 @@ function SeccionImpuestos() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const stored = loadParams();
-    if (stored?.impuestos) setData(stored.impuestos);
+    loadParams().then(all => { if (all.impuestos) setData(all.impuestos as ImpuestosParams); });
   }, []);
 
-  const handleSave = () => {
-    saveParams('impuestos', data);
+  const handleSave = async () => {
+    await saveParams('impuestos', data);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setData(DEFAULT_IMPUESTOS);
-    saveParams('impuestos', DEFAULT_IMPUESTOS);
+    await saveParams('impuestos', DEFAULT_IMPUESTOS);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -430,19 +441,18 @@ function SeccionPagos() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const stored = loadParams();
-    if (stored?.pagos) setData(stored.pagos);
+    loadParams().then(all => { if (all.pagos) setData(all.pagos as MedioPago[]); });
   }, []);
 
-  const handleSave = () => {
-    saveParams('pagos', data);
+  const handleSave = async () => {
+    await saveParams('pagos', data);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setData(DEFAULT_PAGOS);
-    saveParams('pagos', DEFAULT_PAGOS);
+    await saveParams('pagos', DEFAULT_PAGOS);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -555,19 +565,18 @@ function SeccionListas() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const stored = loadParams();
-    if (stored?.listas) setData(stored.listas);
+    loadParams().then(all => { if (all.listas) setData(all.listas as ListaPrecio[]); });
   }, []);
 
-  const handleSave = () => {
-    saveParams('listas', data);
+  const handleSave = async () => {
+    await saveParams('listas', data);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setData(DEFAULT_LISTAS);
-    saveParams('listas', DEFAULT_LISTAS);
+    await saveParams('listas', DEFAULT_LISTAS);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -711,19 +720,18 @@ function SeccionRedondeo() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    const stored = loadParams();
-    if (stored?.redondeo) setData(stored.redondeo);
+    loadParams().then(all => { if (all.redondeo) setData(all.redondeo as RedondeoParams); });
   }, []);
 
-  const handleSave = () => {
-    saveParams('redondeo', data);
+  const handleSave = async () => {
+    await saveParams('redondeo', data);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setData(DEFAULT_REDONDEO);
-    saveParams('redondeo', DEFAULT_REDONDEO);
+    await saveParams('redondeo', DEFAULT_REDONDEO);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };
@@ -1908,6 +1916,358 @@ function SeccionOdoo() {
   );
 }
 
+// ── Sección: MercadoLibre API ─────────────────────────────────────────────────
+function SeccionML() {
+  const { settings, loading, save } = useSettings();
+  const [appId,     setAppId]     = useState('');
+  const [appSecret, setAppSecret] = useState('');
+  const [site,      setSite]      = useState('MLA');
+  const [showSecret, setShowSecret] = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [testing,   setTesting]   = useState(false);
+  const [testResult, setTestResult] = useState<'ok' | 'error' | null>(null);
+
+  useEffect(() => {
+    if (!loading) {
+      setAppId(settings.mlAppId ?? '');
+      setAppSecret(settings.mlAppSecret ?? '');
+      setSite(settings.mlSite ?? 'MLA');
+    }
+  }, [loading, settings.mlAppId, settings.mlAppSecret, settings.mlSite]);
+
+  const handleSave = async () => {
+    await save({ mlAppId: appId.trim(), mlAppSecret: appSecret.trim(), mlSite: site });
+    setSaved(true);
+    setTestResult(null);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const handleTest = async () => {
+    if (!appId || !appSecret) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/ml-search?q=cepillo&limit=2`);
+      const data = await res.json() as { ok: boolean; error?: string };
+      setTestResult(data.ok ? 'ok' : 'error');
+    } catch {
+      setTestResult('error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const configured = !!(appId && appSecret);
+
+  return (
+    <div>
+      <SectionHeader
+        title="MercadoLibre API"
+        subtitle="Configurá tu App de MercadoLibre para habilitar el escaneo de competencia en ML Lab."
+      />
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 mb-5 shadow-sm space-y-5">
+
+        {/* Estado actual */}
+        <div className={cn(
+          'flex items-center gap-3 px-4 py-3 rounded-xl border',
+          configured
+            ? 'bg-[#16A34A]/5 border-[#16A34A]/20'
+            : 'bg-[#F97316]/5 border-[#F97316]/20',
+        )}>
+          <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', configured ? 'bg-[#16A34A]' : 'bg-[#F97316]')} />
+          <p className={cn('text-[12px] font-semibold', configured ? 'text-[#16A34A]' : 'text-[#F97316]')}>
+            {configured ? 'Credenciales configuradas — escaneo activo' : 'Sin credenciales — escaneo deshabilitado'}
+          </p>
+        </div>
+
+        {/* Cómo obtenerlas */}
+        <div className="bg-[#FFE600]/8 border border-[#FFE600]/30 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <ShoppingCart className="w-4 h-4 text-gray-700 mt-0.5 shrink-0" />
+            <div className="space-y-1.5">
+              <p className="text-[12px] font-bold text-gray-800">¿Cómo obtener las credenciales?</p>
+              <ol className="text-[11px] text-gray-600 space-y-1 list-decimal list-inside">
+                <li>Ingresá a <strong>developers.mercadolibre.com.ar</strong> con tu cuenta ML</li>
+                <li>Creá una nueva app → tipo <strong>Marketplace</strong> → cualquier nombre</li>
+                <li>En el detalle de la app copiá el <strong>App ID</strong> y el <strong>Secret Key</strong></li>
+                <li>Pegálos acá abajo y guardá</li>
+              </ol>
+              <a
+                href="https://developers.mercadolibre.com.ar/devcenter"
+                target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-1 text-[11px] font-bold text-[#3483FA] hover:underline"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Ir al Dev Center de ML
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Inputs */}
+        <div className="space-y-4">
+          {/* App ID */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              App ID
+            </label>
+            <input
+              type="text"
+              value={appId}
+              onChange={e => { setAppId(e.target.value); setTestResult(null); }}
+              placeholder="Ej: 1234567890123456"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3483FA]/30 focus:border-[#3483FA] font-mono"
+            />
+          </div>
+
+          {/* Secret Key */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Secret Key
+            </label>
+            <div className="relative">
+              <input
+                type={showSecret ? 'text' : 'password'}
+                value={appSecret}
+                onChange={e => { setAppSecret(e.target.value); setTestResult(null); }}
+                placeholder="Tu clave secreta de ML"
+                className="w-full px-3 py-2.5 pr-10 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3483FA]/30 focus:border-[#3483FA] font-mono"
+              />
+              <button
+                onClick={() => setShowSecret(v => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                type="button"
+              >
+                {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Site */}
+          <div>
+            <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              País / Sitio
+            </label>
+            <select
+              value={site}
+              onChange={e => setSite(e.target.value)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#3483FA]/30 focus:border-[#3483FA] bg-white"
+            >
+              <option value="MLA">Argentina (MLA)</option>
+              <option value="MLB">Brasil (MLB)</option>
+              <option value="MLC">Chile (MLC)</option>
+              <option value="MLM">México (MLM)</option>
+              <option value="MLU">Uruguay (MLU)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Resultado del test */}
+        {testResult && (
+          <div className={cn(
+            'flex items-center gap-2 px-4 py-3 rounded-xl text-[12px] font-semibold',
+            testResult === 'ok'
+              ? 'bg-[#16A34A]/8 text-[#16A34A] border border-[#16A34A]/20'
+              : 'bg-[#EF4444]/8 text-[#EF4444] border border-[#EF4444]/20',
+          )}>
+            {testResult === 'ok'
+              ? '✓ Conexión exitosa — el escaneo está funcionando'
+              : '✗ Error de conexión — revisá las credenciales'}
+          </div>
+        )}
+
+        {/* Botones */}
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={!appId || !appSecret}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl text-[12px] font-bold hover:bg-gray-800 disabled:opacity-40 transition-colors"
+          >
+            {saved
+              ? <><Check className="w-4 h-4" /> Guardado</>
+              : <><Save className="w-4 h-4" /> Guardar credenciales</>}
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={!configured || testing}
+            className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 rounded-xl text-[12px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+          >
+            {testing
+              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Probando...</>
+              : <><RefreshCw className="w-3.5 h-3.5" /> Probar conexión</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sección: Gemini AI ────────────────────────────────────────────────────────
+function SeccionGemini() {
+  const { settings, loading, save } = useSettings();
+  const [apiKey,     setApiKey]     = useState('');
+  const [showKey,    setShowKey]    = useState(false);
+  const [saved,      setSaved]      = useState(false);
+  const [testing,    setTesting]    = useState(false);
+  const [testResult, setTestResult] = useState<'ok' | 'error' | null>(null);
+  const [testMsg,    setTestMsg]    = useState('');
+
+  useEffect(() => {
+    if (!loading) setApiKey(settings.geminiKey ?? '');
+  }, [loading, settings.geminiKey]);
+
+  const handleSave = async () => {
+    await save({ geminiKey: apiKey.trim() });
+    setSaved(true);
+    setTestResult(null);
+    setTimeout(() => setSaved(false), 2500);
+  };
+
+  const handleTest = async () => {
+    if (!apiKey.trim()) return;
+    setTesting(true);
+    setTestResult(null);
+    setTestMsg('');
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey.trim()}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Respondé solo "ok"' }] }],
+          generationConfig: { maxOutputTokens: 10 },
+        }),
+      });
+      const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (res.ok && reply) {
+        setTestResult('ok');
+        setTestMsg(`Gemini respondió: "${reply.trim()}"`);
+      } else {
+        setTestResult('error');
+        setTestMsg(`Error ${res.status}`);
+      }
+    } catch (e) {
+      setTestResult('error');
+      setTestMsg(String(e).slice(0, 80));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const configured = !!(apiKey.trim());
+
+  return (
+    <div>
+      <SectionHeader
+        title="Gemini AI"
+        subtitle="Clave de API para el Consultor IA y el análisis inteligente en ML Lab."
+      />
+
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 mb-5 shadow-sm space-y-5">
+
+        {/* Estado */}
+        <div className={cn(
+          'flex items-center gap-3 px-4 py-3 rounded-xl border',
+          configured
+            ? 'bg-[#16A34A]/5 border-[#16A34A]/20'
+            : 'bg-[#F97316]/5 border-[#F97316]/20',
+        )}>
+          <div className={cn('w-2.5 h-2.5 rounded-full shrink-0', configured ? 'bg-[#16A34A]' : 'bg-[#F97316]')} />
+          <p className={cn('text-[12px] font-semibold', configured ? 'text-[#16A34A]' : 'text-[#F97316]')}>
+            {configured ? 'Clave configurada — Consultor IA activo' : 'Sin clave — Consultor en modo básico'}
+          </p>
+        </div>
+
+        {/* Cómo obtenerla */}
+        <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <Sparkles className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
+            <div className="space-y-1.5">
+              <p className="text-[12px] font-bold text-gray-800">¿Cómo obtener la clave?</p>
+              <ol className="text-[11px] text-gray-600 space-y-1 list-decimal list-inside">
+                <li>Entrá a <strong>aistudio.google.com</strong> con tu cuenta Google</li>
+                <li>Clic en <strong>&ldquo;Get API key&rdquo;</strong> → <strong>&ldquo;Create API key&rdquo;</strong></li>
+                <li>Copiá la clave y pegála abajo</li>
+              </ol>
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 mt-1 text-[11px] font-bold text-purple-600 hover:underline"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Ir a Google AI Studio
+              </a>
+            </div>
+          </div>
+        </div>
+
+        {/* Input */}
+        <div>
+          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            API Key
+          </label>
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={e => { setApiKey(e.target.value); setTestResult(null); }}
+              placeholder="AIzaSy..."
+              className="w-full px-3 py-2.5 pr-10 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400/30 focus:border-purple-400 font-mono"
+            />
+            <button
+              onClick={() => setShowKey(v => !v)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              type="button"
+            >
+              {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-gray-400">
+            La clave se guarda en el servidor — funciona desde cualquier dispositivo.
+          </p>
+        </div>
+
+        {/* Resultado test */}
+        {testResult && (
+          <div className={cn(
+            'flex items-start gap-2 px-4 py-3 rounded-xl text-[12px] font-semibold',
+            testResult === 'ok'
+              ? 'bg-[#16A34A]/8 text-[#16A34A] border border-[#16A34A]/20'
+              : 'bg-[#EF4444]/8 text-[#EF4444] border border-[#EF4444]/20',
+          )}>
+            <span>{testResult === 'ok' ? '✓' : '✗'}</span>
+            <span>{testMsg || (testResult === 'ok' ? 'Conexión exitosa' : 'Error — revisá la clave')}</span>
+          </div>
+        )}
+
+        {/* Botones */}
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={handleSave}
+            disabled={!configured}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl text-[12px] font-bold hover:bg-gray-800 disabled:opacity-40 transition-colors"
+          >
+            {saved
+              ? <><Check className="w-4 h-4" /> Guardado</>
+              : <><Save className="w-4 h-4" /> Guardar clave</>}
+          </button>
+          <button
+            onClick={handleTest}
+            disabled={!configured || testing}
+            className="flex items-center gap-2 px-4 py-2.5 border border-gray-200 rounded-xl text-[12px] font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors"
+          >
+            {testing
+              ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Probando...</>
+              : <><Sparkles className="w-3.5 h-3.5" /> Probar Gemini</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ParametrosPage() {
   const [activeSection, setActiveSection] = useState('dolar');
 
@@ -1919,6 +2279,8 @@ export default function ParametrosPage() {
     { key: 'redondeo',  label: 'Redondeo',         icon: Calculator,  desc: 'Reglas de redondeo' },
     { key: 'datos',     label: 'Datos',            icon: HardDrive,   desc: 'Reset e importación' },
     { key: 'odoo',      label: 'Integración Odoo', icon: Globe,       desc: 'URL e imágenes' },
+    { key: 'ml',        label: 'MercadoLibre API', icon: ShoppingCart, desc: 'Escaneo de competencia' },
+    { key: 'gemini',    label: 'Gemini AI',        icon: Sparkles,     desc: 'Consultor inteligente' },
   ];
 
   return (
@@ -2011,6 +2373,8 @@ export default function ParametrosPage() {
             {activeSection === 'redondeo'  && <SeccionRedondeo />}
             {activeSection === 'datos'     && <SeccionDatos />}
             {activeSection === 'odoo'      && <SeccionOdoo />}
+            {activeSection === 'ml'        && <SeccionML />}
+            {activeSection === 'gemini'    && <SeccionGemini />}
           </div>
         </div>
       </div>

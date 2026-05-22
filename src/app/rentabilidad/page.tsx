@@ -20,7 +20,7 @@ interface Product {
   active: boolean;
 }
 
-const allProds = (productsData as unknown as Product[]).filter(p => p.active !== false);
+const allProds = (productsData as unknown as (Product & { hidden?: boolean })[]).filter(p => p.active !== false && !p.hidden);
 const withData = allProds.filter(p => p.cost > 0 && p.price > 1 && p.margin !== null);
 const sinCosto = allProds.filter(p => !p.cost || p.cost === 0);
 

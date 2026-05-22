@@ -6,9 +6,19 @@ const SETTINGS_PATH = resolve(process.cwd(), 'src/data/settings.json');
 
 interface Settings {
   odooServerUrl: string;
+  mlAppId:       string;
+  mlAppSecret:   string;
+  mlSite:        string;
+  geminiKey:     string;
 }
 
-const DEFAULT_SETTINGS: Settings = { odooServerUrl: '' };
+const DEFAULT_SETTINGS: Settings = {
+  odooServerUrl: '',
+  mlAppId:       '',
+  mlAppSecret:   '',
+  mlSite:        'MLA',
+  geminiKey:     '',
+};
 
 function readSettings(): Settings {
   try {

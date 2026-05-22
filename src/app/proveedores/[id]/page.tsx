@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import * as XLSX from 'xlsx';
 import { saveSupplierOverride, loadSupplierOverride } from '@/lib/use-local-storage';
 import { loadGeminiKey } from '@/lib/gemini-key';
 import type { Supplier, SupplierStatus } from '@/types';
+import { SeiqImportModal, SeiqBadge } from '@/components/shared/seiq-import-modal';
 
 // ── Colores por rubro ─────────────────────────────────────────────────────────
 const rubroColors: Record<string, string> = {
@@ -46,6 +47,9 @@ interface RealContact {
   tags: string[]; fiscalCondition: string | null; odooId?: number | null;
 }
 const suppliersContacts = suppliersContactsRaw as unknown as RealContact[];
+const supplierAllNames: string[] = Array.from(new Set(
+  (suppliersContactsRaw as Array<{ name: string }>).map(s => s.name)
+)).sort();
 import {
   ArrowLeft, Upload, Download, Edit2, Phone, Mail, Building2,
   DollarSign, Package, CheckCircle2, Search,
@@ -89,6 +93,14 @@ type ViewMode = 'tabla' | 'grid' | 'pedido';
 
 interface ProductRow extends OdooProduct {
   productStatus: ProductStatus;
+}
+
+interface SysProduct {
+  id: string; name: string; sku: string | null;
+  cost: number; price: number; margin: number | null;
+  supplierName: string | null; odooId: number | null;
+  active: boolean; hidden?: boolean; category: string | null;
+  image: string | null; seiqCategory?: string;
 }
 
 // ── Helpers
@@ -1196,35 +1208,48 @@ function parseCatalogSheets(
     return false;
   };
 
-  // Detecta la fila de encabezado para encontrar las columnas correctas
-  const detectColumns = (rows: unknown[][]): { codeCol: number; descCol: number; priceCol: number; unitCol: number; packCol: number } => {
-    for (let i = 0; i < Math.min(10, rows.length); i++) {
+  // Detecta la fila de encabezado y devuelve los índices de columnas + moneda detectada
+  const detectColumns = (rows: unknown[][]): { codeCol: number; descCol: number; priceCol: number; unitCol: number; packCol: number; priceIsARS: boolean } => {
+    for (let i = 0; i < Math.min(12, rows.length); i++) {
       const row = rows[i] as unknown[];
       if (!row) continue;
       for (let c = 0; c < row.length; c++) {
-        const cell = norm(row[c]).toLowerCase();
-        if (cell === 'código' || cell === 'codigo' || cell === 'cod.' || cell === 'cod') {
-          // Encontramos la columna de código; detectar las demás relativas
-          const descCol  = row.slice(c+1).findIndex(v => { const s = norm(v).toLowerCase(); return s.includes('descri') || s.includes('produc') || s.includes('articulo') || s.includes('artículo'); });
-          const priceCol = row.slice(c).findIndex(v => { const s = norm(v).toLowerCase(); return s.includes('precio') || s === 'usd' || s === 'u$s' || s === '$'; });
+        const cell = norm(row[c]).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        if (cell === 'codigo' || cell === 'cod.' || cell === 'cod' || cell === 'art' || cell === 'articulo') {
+          const descCol = row.slice(c+1).findIndex(v => {
+            const s = norm(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+            return s.includes('descri') || s.includes('produc') || s.includes('articulo') || s.includes('nombre') || s.includes('denom');
+          });
+          // Orden de preferencia: columnas USD primero, luego ARS/Final
+          const priceUSDIdx = row.slice(c).findIndex(v => {
+            const s = norm(v).toLowerCase();
+            return s.includes('precio') || s === 'usd' || s === 'u$s' || s === '$' || s.includes('lista') || s.includes('publico');
+          });
+          const priceARSIdx = row.slice(c).findIndex(v => {
+            const s = norm(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+            return s === 'final' || s === 'neto' || s === 'precio final' || s === 'precio neto' || s === 'p neto' || s.includes('precio final') || s.includes('precio neto') || s === 'ars';
+          });
+          const isARS    = priceUSDIdx === -1 && priceARSIdx !== -1;
+          const priceIdx = priceUSDIdx !== -1 ? priceUSDIdx : priceARSIdx;
           return {
             codeCol:  c,
             descCol:  descCol >= 0 ? c + 1 + descCol : c + 1,
-            priceCol: priceCol >= 0 ? c + priceCol : c + 5,
+            priceCol: priceIdx >= 0 ? c + priceIdx : c + 5,
             unitCol:  c + 6,
             packCol:  c + 7,
+            priceIsARS: isARS,
           };
         }
       }
     }
-    // Fallback a estructura Vulcano estándar (col[1]=código, col[2]=desc, col[6]=precio)
-    return { codeCol: 1, descCol: 2, priceCol: 6, unitCol: 7, packCol: 8 };
+    // Fallback a estructura Vulcano estándar (col[1]=código, col[2]=desc, col[6]=precio USD)
+    return { codeCol: 1, descCol: 2, priceCol: 6, unitCol: 7, packCol: 8, priceIsARS: false };
   };
 
   let idx = 0;
   for (const { name: sheetName, rows } of sheets) {
     if (!rows || rows.length < 3) continue;
-    const { codeCol, descCol, priceCol, unitCol, packCol } = detectColumns(rows);
+    const { codeCol, descCol, priceCol, unitCol, packCol, priceIsARS } = detectColumns(rows);
     let cat = '';
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i] as unknown[];
@@ -1233,11 +1258,13 @@ function parseCatalogSheets(
       const col2 = norm(row[descCol]);
       if (isProductCode(col1) && col2) {
         const code  = norm(col1);
-        const pUSD  = toNum(row[priceCol]);
+        const price = toNum(row[priceCol]);
         const match = byCode.get(code.toLowerCase()) ?? byName.get(col2.toLowerCase());
         items.push({
           id: `cat_${idx++}`, sheet: sheetName, category: cat,
-          code, desc: col2, priceUSD: pUSD || null, priceARS: null,
+          code, desc: col2,
+          priceUSD: priceIsARS ? null : (price || null),
+          priceARS: priceIsARS ? (price || null) : null,
           unit: norm(row[unitCol]) || 'U', pack: toNum(row[packCol]) || 1,
           isNew: norm(row[codeCol - 1] ?? '').toLowerCase().includes('nuevo') || norm(row[codeCol + 4] ?? '').toLowerCase().includes('nuevo'),
           notes: '', source: 'excel',
@@ -1319,9 +1346,56 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
   const [savedAt,     setSavedAt]     = useState<string | null>(null);
   const [savingCat,   setSavingCat]   = useState(false);
   const [saveOk,      setSaveOk]      = useState(false);
+  // ── Aplicar costos desde catálogo ──────────────────────────────────────
+  const [applyingCostId, setApplyingCostId] = useState<string | null>(null);
+  const [appliedCosts,   setAppliedCosts]   = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   const supplierSlug = supplierName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+  // ── Website de búsqueda por proveedor (para ver fotos/fichas) ──────────
+  const SUPPLIER_SEARCH_URLS: Record<string, string> = {
+    'vulcano': 'https://vulcano-sa.com.ar/?s=',
+    'mavi':    'https://www.mavi.com.ar/buscar?q=',
+    'canple':  'https://www.canple.com.ar/?s=',
+    'nataclor':'https://nataclor.com.ar/?s=',
+  };
+  const websiteSearchUrl = (() => {
+    const slug = supplierSlug;
+    for (const [key, url] of Object.entries(SUPPLIER_SEARCH_URLS)) {
+      if (slug.includes(key)) return url;
+    }
+    return null;
+  })();
+
+  const applyCatalogCost = async (item: CatalogItem, newCostARS: number) => {
+    if (!item.acquaId) return;
+    setApplyingCostId(item.id);
+    try {
+      const body: Record<string, unknown> = { id: item.acquaId, cost: newCostARS, source: 'catalog' };
+
+      // Costo SUBIÓ → ajustar precio para mantener el mismo markup
+      // Costo BAJÓ  → NO tocar el precio (el margen mejora solo)
+      const oldCost  = item.acquaCost ?? 0;
+      const oldPrice = item.acquaPrice ?? 0;
+      if (newCostARS > oldCost && oldCost > 0 && oldPrice > oldCost) {
+        const currentMarkup = (oldPrice / oldCost) - 1;          // e.g. 0.85 = 85%
+        const newPrice = Math.round(newCostARS * (1 + currentMarkup));
+        body.price = newPrice;
+      }
+      // Si costo bajó: body solo lleva el nuevo costo → precio intacto → markup mejora
+
+      const res = await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json() as { ok: boolean };
+      if (data.ok) setAppliedCosts(prev => new Set([...prev, item.id]));
+    } finally {
+      setApplyingCostId(null);
+    }
+  };
 
   // ── Cargar catálogo guardado al abrir ──────────────────────────────────
   useEffect(() => {
@@ -1397,8 +1471,12 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
           name,
           rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: '', blankrows: false }),
         }));
-        setItems(parseCatalogSheets(sheets, supplierProductCodes));
-        setCurrency('USD');
+        const parsed = parseCatalogSheets(sheets, supplierProductCodes);
+        setItems(parsed);
+        const hasARS = parsed.some(i => i.priceARS != null);
+        const hasUSD = parsed.some(i => i.priceUSD != null);
+        setCurrency(hasARS && !hasUSD ? 'ARS' : 'USD');
+        if (hasARS && !hasUSD) setUsdRate(0);
         setPhase('ready');
       } catch (e) { setError('Error leyendo el Excel: ' + String(e)); setPhase('idle'); }
     } else {
@@ -1468,15 +1546,34 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
           <div className="flex items-center gap-2">
             {(phase === 'ready' || phase === 'review') && (
               <>
-                {(currency === 'USD' || currency === 'unknown') && (
-                  <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5">
-                    <span className="text-[10px] font-semibold text-amber-700">USD →</span>
-                    <span className="text-[10px] text-amber-500">$</span>
-                    <input type="number" value={usdRate} onChange={e => setUsdRate(Math.max(1, Number(e.target.value)))}
-                      className="w-16 text-[12px] font-bold text-amber-800 bg-transparent outline-none" step="50" />
-                    <span className="text-[9px] text-amber-400">ARS</span>
+                {/* ── Selector moneda ── */}
+                <div className="flex items-center gap-1.5">
+                  <div className="flex bg-gray-100 rounded-lg p-0.5">
+                    <button
+                      onClick={() => { setCurrency('ARS'); setUsdRate(0); }}
+                      className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap',
+                        currency === 'ARS' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+                    >$ Pesos</button>
+                    <button
+                      onClick={() => { setCurrency('USD'); if (!usdRate) setUsdRate(1200); }}
+                      className={cn('px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors whitespace-nowrap',
+                        currency !== 'ARS' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+                    >USD</button>
                   </div>
-                )}
+                  {currency !== 'ARS' && (
+                    <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                      <span className="text-[9px] font-bold text-amber-600">TC $</span>
+                      <input
+                        type="number"
+                        value={usdRate || ''}
+                        onChange={e => setUsdRate(Math.max(1, Number(e.target.value)))}
+                        placeholder="1200"
+                        className="w-14 text-[11px] font-bold text-amber-800 bg-transparent outline-none"
+                        step="50"
+                      />
+                    </div>
+                  )}
+                </div>
                 <div className="flex bg-gray-100 rounded-lg p-0.5">
                   <button onClick={() => setTab('catalogo')}
                     className={cn('px-3 py-1.5 rounded-md text-[11px] font-semibold transition-colors', tab === 'catalogo' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500')}>
@@ -1530,6 +1627,43 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                 <p className="font-semibold mb-1">📋 ¿Para qué sirve el catálogo?</p>
                 <p>Es la <strong>lista de precios del proveedor</strong> — todos los productos que vende, con sus precios. Cargala una vez y queda guardada. Cuando llegue una lista nueva, usá <em>"Actualizar lista"</em> para reemplazarla.</p>
                 <p className="mt-1">Los productos que ya tenés en Odoo aparecen marcados como <strong>✓ En Acqua</strong>, con tu costo actual para comparar.</p>
+              </div>
+              {/* Selector moneda antes de subir */}
+              <div className="w-full max-w-lg">
+                <p className="text-[11px] font-semibold text-gray-500 mb-2">¿Los precios de este proveedor están en…?</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
+                    <button
+                      onClick={() => { setCurrency('ARS'); setUsdRate(0); }}
+                      className={cn('px-4 py-2 rounded-lg text-[12px] font-bold transition-all',
+                        currency === 'ARS' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+                    >💲 Pesos ARS</button>
+                    <button
+                      onClick={() => { setCurrency('USD'); if (!usdRate || usdRate === 0) setUsdRate(1200); }}
+                      className={cn('px-4 py-2 rounded-lg text-[12px] font-bold transition-all',
+                        currency !== 'ARS' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+                    >💵 Dólares USD</button>
+                  </div>
+                  {currency !== 'ARS' && (
+                    <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex-1">
+                      <span className="text-[11px] font-bold text-amber-600 whitespace-nowrap">Tipo de cambio: $</span>
+                      <input
+                        type="number"
+                        value={usdRate || ''}
+                        onChange={e => setUsdRate(Math.max(1, Number(e.target.value)))}
+                        placeholder="1200"
+                        className="flex-1 min-w-0 text-[13px] font-bold text-amber-800 bg-transparent outline-none"
+                        step="50"
+                      />
+                      <span className="text-[10px] text-amber-400">ARS</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1.5">
+                  {currency === 'ARS'
+                    ? 'Los precios se muestran directamente en pesos.'
+                    : 'Los precios en USD se convierten al tipo de cambio ingresado.'}
+                </p>
               </div>
               {error && (
                 <div className="w-full max-w-lg bg-danger/5 border border-danger/20 rounded-xl p-3 text-[12px] text-danger flex items-start gap-2">
@@ -1674,9 +1808,17 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                         <tr key={item.id} className={cn('border-b border-gray-50 hover:bg-gray-50/70 transition-colors', item.inAcqua && 'bg-green-50/20')}>
                           <td className="px-3 py-1.5"><span className="text-[9px] text-gray-400 truncate block max-w-[110px]" title={item.category}>{item.category}</span></td>
                           <td className="px-3 py-1.5">
-                            <span className="font-mono text-[10px] text-gray-700 font-semibold">{item.code}</span>
-                            {item.isNew && <span className="ml-1 text-[8px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">NEW</span>}
-                            {item.source === 'ai' && <span className="ml-1 text-[8px] bg-purple-100 text-purple-600 px-1 py-0.5 rounded">IA</span>}
+                            <div className="flex items-center gap-1">
+                              <span className="font-mono text-[10px] text-gray-700 font-semibold">{item.code}</span>
+                              {websiteSearchUrl && (
+                                <a href={`${websiteSearchUrl}${encodeURIComponent(item.code)}`} target="_blank" rel="noopener noreferrer"
+                                  title="Ver en web del proveedor"
+                                  className="text-[9px] text-blue-400 hover:text-blue-600 transition-colors"
+                                >🔗</a>
+                              )}
+                            </div>
+                            {item.isNew && <span className="text-[8px] bg-green-100 text-green-700 px-1 py-0.5 rounded font-bold">NEW</span>}
+                            {item.source === 'ai' && <span className="text-[8px] bg-purple-100 text-purple-600 px-1 py-0.5 rounded ml-1">IA</span>}
                           </td>
                           <td className="px-3 py-1.5 max-w-[250px]">
                             <span className="text-gray-800 leading-tight line-clamp-2 text-[11px]">{item.desc}</span>
@@ -1701,14 +1843,42 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                               <div>
                                 <p className="text-[10px] text-gray-600 leading-tight truncate max-w-[170px]" title={item.acquaName}>{item.acquaName}</p>
                                 {item.acquaCost && arsPrice ? (
-                                  <p className="text-[9px]">
-                                    <span className="text-gray-400">Costo: {formatARS(item.acquaCost)}</span>
-                                    {priceDiff !== null && (
-                                      <span className={cn('ml-1 font-bold', priceDiff > 0 ? 'text-danger' : 'text-success')}>
-                                        {priceDiff > 0 ? '↑' : '↓'} {formatARS(Math.abs(priceDiff))}
-                                      </span>
+                                  <div>
+                                    <p className="text-[9px]">
+                                      <span className="text-gray-400">Costo: {formatARS(item.acquaCost)}</span>
+                                      {priceDiff !== null && (
+                                        <span className={cn('ml-1 font-bold', priceDiff > 0 ? 'text-danger' : 'text-success')}>
+                                          {priceDiff > 0 ? '↑' : '↓'} {formatARS(Math.abs(priceDiff))}
+                                        </span>
+                                      )}
+                                    </p>
+                                    {/* Botón aplicar costo — solo si hay diferencia real */}
+                                    {priceDiff !== null && Math.abs(priceDiff) > 1 && item.acquaId && arsPrice && (
+                                      <button
+                                        onClick={() => applyCatalogCost(item, arsPrice)}
+                                        disabled={applyingCostId === item.id || appliedCosts.has(item.id)}
+                                        title={priceDiff > 0
+                                          ? `Costo sube → precio se ajusta para mantener markup`
+                                          : `Costo baja → precio queda igual → mejora tu margen`}
+                                        className={cn(
+                                          'mt-0.5 text-[8px] font-bold px-1.5 py-0.5 rounded transition-all disabled:opacity-50',
+                                          appliedCosts.has(item.id)
+                                            ? 'text-success bg-success/10'
+                                            : priceDiff > 0
+                                            ? 'text-danger bg-danger/10 hover:bg-danger/20 cursor-pointer'
+                                            : 'text-success bg-success/10 hover:bg-success/20 cursor-pointer'
+                                        )}
+                                      >
+                                        {appliedCosts.has(item.id)
+                                          ? '✓ Aplicado'
+                                          : applyingCostId === item.id
+                                          ? '…'
+                                          : priceDiff > 0
+                                          ? '↑ Aplicar — sube precio'
+                                          : '↓ Aplicar — mejora margen'}
+                                      </button>
                                     )}
-                                  </p>
+                                  </div>
                                 ) : null}
                               </div>
                             ) : <span className="text-gray-300 text-[10px]">—</span>}
@@ -1986,8 +2156,17 @@ export default function SupplierDetailPage() {
   const [showUpload,   setShowUpload]   = useState(false);
   const [showCompare,  setShowCompare]  = useState(false);
   const [showCatalog,  setShowCatalog]  = useState(false);
+  const [showSeiq,     setShowSeiq]     = useState(false);
   const [geminiKey,    setGeminiKey]    = useState('');
+  const isSeiq = realContact?.name === 'SEIQ GROUP S.A.';
   const [editingRow, setEditingRow] = useState<string | null>(null);
+
+  // ── Catalog status (preloaded so the left panel shows it without opening modal) ──
+  const [catalogInfo, setCatalogInfo] = useState<{ count: number; savedAt: string } | null>(null);
+
+  // ── Pagination ────────────────────────────────────────────────────────────
+  const [pageSize, setPageSize] = useState<25 | 50 | 100>(50);
+  const [currentPage, setCurrentPage] = useState(0);
   const [prices, setPrices] = useState<Record<string, number>>({});
   // Pedido: cantidad por producto
   const [pedido, setPedido] = useState<Record<string, number>>({});
@@ -2025,15 +2204,99 @@ export default function SupplierDetailPage() {
 
   // ── Activar/desactivar proveedor ─────────────────────────────────────────
   const SUPPLIER_ACTIVE_KEY = `acqua_supplier_active_${id}`;
-  const [supplierActive, setSupplierActive] = useState<boolean>(() => {
+  const [supplierActive,   setSupplierActive]   = useState<boolean>(() => {
     try { return JSON.parse(localStorage.getItem(SUPPLIER_ACTIVE_KEY) ?? 'true') as boolean; }
     catch { return true; }
   });
-  const toggleSupplierActive = () => {
+  const [togglingSupplier, setTogglingSupplier] = useState(false);
+  const [toggleToast,      setToggleToast]      = useState<string | null>(null);
+
+  const toggleSupplierActive = async () => {
+    if (!supplier) return;
     const next = !supplierActive;
-    setSupplierActive(next);
-    localStorage.setItem(SUPPLIER_ACTIVE_KEY, JSON.stringify(next));
+    setTogglingSupplier(true);
+    try {
+      const res = await fetch('/api/suppliers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierName: supplier.name, active: next }),
+      });
+      const data = await res.json() as { ok: boolean; affected?: number };
+      if (data.ok) {
+        setSupplierActive(next);
+        localStorage.setItem(SUPPLIER_ACTIVE_KEY, JSON.stringify(next));
+        const msg = next
+          ? `✅ Proveedor activado — ${data.affected ?? 0} productos reactivados`
+          : `⏸ Proveedor pausado — ${data.affected ?? 0} productos desactivados`;
+        setToggleToast(msg);
+        setTimeout(() => setToggleToast(null), 4000);
+      }
+    } finally {
+      setTogglingSupplier(false);
+    }
   };
+
+  // ── Load catalog info on mount (and after catalog modal closes) ────────────
+  const refreshCatalogInfo = (name: string) => {
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    fetch(`/api/supplier-catalog?slug=${encodeURIComponent(slug)}`)
+      .then(r => r.json())
+      .then((data: { items?: unknown[]; savedAt?: string } | null) => {
+        if (data?.items?.length) {
+          setCatalogInfo({ count: (data.items as unknown[]).length, savedAt: data.savedAt ?? '' });
+        } else {
+          setCatalogInfo(null);
+        }
+      })
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    if (supplier?.name) refreshCatalogInfo(supplier.name);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplier?.name]);
+
+  // ── Sistema products (live from /api/products, filtered by this supplier) ──
+  const [dataSource,  setDataSource]  = useState<'odoo' | 'sistema'>('odoo');
+  const [sysProds,    setSysProds]    = useState<SysProduct[]>([]);
+  const [sysLoading,  setSysLoading]  = useState(false);
+  const [changingId,  setChangingId]  = useState<string | null>(null);
+  const [newSupName,  setNewSupName]  = useState('');
+
+  const loadSysProds = useCallback(async (name: string) => {
+    setSysLoading(true);
+    try {
+      const res  = await fetch('/api/products');
+      const all  = await res.json() as SysProduct[];
+      const norm = (s: string) => s.trim().toLowerCase();
+      setSysProds(
+        Array.isArray(all)
+          ? all.filter(p => p.active !== false && !p.hidden && p.supplierName && norm(p.supplierName) === norm(name))
+          : []
+      );
+    } catch { /* silent */ }
+    finally { setSysLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    if (supplier?.name && dataSource === 'sistema') loadSysProds(supplier.name);
+  }, [supplier?.name, dataSource, loadSysProds]);
+
+  const saveNewSupplier = async (productId: string) => {
+    const name = newSupName.trim();
+    if (!name) return;
+    await fetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: productId, supplierName: name, source: 'proveedor-page' }),
+    });
+    setSysProds(prev => prev.filter(p => p.id !== productId));
+    setChangingId(null);
+    setNewSupName('');
+  };
+
+  // ── Reset page on filter / search change ─────────────────────────────────
+  useEffect(() => { setCurrentPage(0); }, [statusFilter, search, showHidden, pageSize]);
 
   const products: ProductRow[] = useMemo(() => {
     if (!odooSupplier) return [];
@@ -2131,6 +2394,13 @@ export default function SupplierDetailPage() {
   return (
     <div className="min-h-screen bg-surface">
 
+      {/* ── Toast de activación/desactivación de proveedor ── */}
+      {toggleToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 bg-gray-900 text-white text-[13px] font-medium rounded-xl shadow-xl border border-white/10 flex items-center gap-2 animate-in slide-in-from-top-2 duration-200">
+          {toggleToast}
+        </div>
+      )}
+
       {showUpload && (
         <UploadModal
           onClose={(refreshed) => {
@@ -2155,10 +2425,24 @@ export default function SupplierDetailPage() {
 
       {showCatalog && (
         <SupplierCatalogModal
-          onClose={() => setShowCatalog(false)}
+          onClose={() => {
+            setShowCatalog(false);
+            refreshCatalogInfo(supplier.name);
+          }}
           supplierName={supplier.name}
           geminiKey={geminiKey}
           supplierProductCodes={odooSupplier?.products.map(p => p.code).filter(Boolean) as string[] | undefined}
+        />
+      )}
+
+      {showSeiq && (
+        <SeiqImportModal
+          onClose={(refreshed) => {
+            setShowSeiq(false);
+            if (refreshed) window.location.reload();
+          }}
+          currentProducts={(productsData as Array<{ id: string; name: string; supplierName: string | null; supplierCode: string | null; cost: number; seiqCategory?: string }>)
+            .filter(p => p.supplierName === 'SEIQ GROUP S.A.')}
         />
       )}
 
@@ -2257,13 +2541,19 @@ export default function SupplierDetailPage() {
                   <div className="absolute top-2 right-2 flex items-center gap-1">
                     <button
                       onClick={toggleSupplierActive}
-                      title={supplierActive ? 'Desactivar proveedor' : 'Activar proveedor'}
+                      disabled={togglingSupplier}
+                      title={supplierActive ? 'Pausar proveedor — desactiva todos sus productos' : 'Activar proveedor'}
                       className={cn(
-                        'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        'flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors disabled:opacity-60',
                         supplierActive ? 'bg-black/30 hover:bg-red-500/60 text-white/90' : 'bg-success/60 hover:bg-success/80 text-white',
                       )}
                     >
-                      {supplierActive ? <><EyeOff className="w-3 h-3" /> Desactivar</> : <><Eye className="w-3 h-3" /> Activar</>}
+                      {togglingSupplier
+                        ? <><RefreshCw className="w-3 h-3 animate-spin" /> Procesando…</>
+                        : supplierActive
+                          ? <><EyeOff className="w-3 h-3" /> Pausar</>
+                          : <><Eye className="w-3 h-3" /> Activar</>
+                      }
                     </button>
                     <button
                       onClick={startEdit}
@@ -2475,6 +2765,19 @@ export default function SupplierDetailPage() {
             {/* Acciones */}
             {!editMode && (
               <div className="mt-4 bg-white rounded-xl border border-gray-100 p-3 space-y-2">
+                {/* SEIQ multi-category price update button */}
+                {isSeiq && (
+                  <button onClick={() => setShowSeiq(true)}
+                    className="flex items-start gap-2 w-full px-3 py-2.5 bg-gradient-to-r from-blue-600 to-blue-500 text-white text-[12px] font-semibold rounded-lg hover:from-blue-700 hover:to-blue-600 transition-all shadow-sm">
+                    <Tag className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <div className="text-left">
+                      <div className="font-bold leading-none">Actualizar precios SEIQ</div>
+                      <div className="text-[10px] font-normal text-blue-200 mt-0.5">
+                        Bidones · Sobres · Masivo · Aerosoles · Alimenticia
+                      </div>
+                    </div>
+                  </button>
+                )}
                 <button onClick={() => setShowUpload(true)}
                   className="flex items-center gap-2 w-full px-3 py-2.5 bg-acqua text-white text-[12px] font-semibold rounded-lg hover:bg-acqua-dark transition-colors">
                   <Upload className="w-3.5 h-3.5" /> Cargar nueva lista
@@ -2483,10 +2786,26 @@ export default function SupplierDetailPage() {
                   className="flex items-center gap-2 w-full px-3 py-2.5 bg-white border border-acqua/40 text-acqua text-[12px] font-semibold rounded-lg hover:bg-acqua/5 transition-colors">
                   <TrendingUp className="w-3.5 h-3.5" /> Comparar listas de precios
                 </button>
-                <button onClick={() => setShowCatalog(true)}
-                  className="flex items-center gap-2 w-full px-3 py-2.5 bg-white border border-purple-200 text-purple-700 text-[12px] font-semibold rounded-lg hover:bg-purple-50 transition-colors">
-                  <Package className="w-3.5 h-3.5" /> Catálogo completo
-                </button>
+                {/* Catálogo — muestra badge si ya hay uno guardado */}
+                {catalogInfo ? (
+                  <button
+                    onClick={() => setShowCatalog(true)}
+                    className="flex items-start gap-2.5 w-full px-3 py-2.5 bg-purple-600 text-white text-[12px] font-semibold rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    <Package className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <div className="text-left">
+                      <div className="font-bold leading-none">Catálogo cargado ✓</div>
+                      <div className="text-[10px] font-normal text-purple-200 mt-0.5">
+                        {catalogInfo.count} productos · {new Date(catalogInfo.savedAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: '2-digit' })}
+                      </div>
+                    </div>
+                  </button>
+                ) : (
+                  <button onClick={() => setShowCatalog(true)}
+                    className="flex items-center gap-2 w-full px-3 py-2.5 bg-white border border-purple-200 text-purple-700 text-[12px] font-semibold rounded-lg hover:bg-purple-50 transition-colors">
+                    <Package className="w-3.5 h-3.5" /> Catálogo completo
+                  </button>
+                )}
                 <button className="flex items-center gap-2 w-full px-3 py-2.5 bg-odoo text-white text-[12px] font-semibold rounded-lg hover:opacity-90 transition-opacity">
                   <Download className="w-3.5 h-3.5" /> Export Odoo (supplierinfo)
                 </button>
@@ -2505,15 +2824,32 @@ export default function SupplierDetailPage() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="font-bold text-gray-900">
-                    {viewMode === 'pedido' ? 'Armar pedido' : 'Productos del proveedor'}
+                    {viewMode === 'pedido' ? 'Armar pedido' : dataSource === 'sistema' ? 'Mis productos' : 'Productos del proveedor'}
                   </h3>
                   <p className="text-[12px] text-gray-400 mt-0.5">
                     {viewMode === 'pedido'
                       ? 'Seleccioná cantidades para armar el pedido de compra'
+                      : dataSource === 'sistema'
+                      ? `${sysProds.length} producto${sysProds.length !== 1 ? 's' : ''} en sistema con este proveedor`
                       : 'Lista vinculada con product.supplierinfo de Odoo'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Source toggle */}
+                  <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden mr-2 text-[11px] font-semibold">
+                    {(['odoo', 'sistema'] as const).map(src => (
+                      <button
+                        key={src}
+                        onClick={() => setDataSource(src)}
+                        className={cn(
+                          'px-3 py-1.5 transition-colors border-r border-gray-200 last:border-0',
+                          dataSource === src ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50'
+                        )}
+                      >
+                        {src === 'odoo' ? 'Odoo' : 'En Sistema'}
+                      </button>
+                    ))}
+                  </div>
                   {/* View mode toggle */}
                   <div className="flex bg-gray-100 rounded-lg p-1 gap-0.5">
                     {([
@@ -2607,8 +2943,160 @@ export default function SupplierDetailPage() {
               </div>
             )}
 
+            {/* ─── VISTA SISTEMA ─── */}
+            {dataSource === 'sistema' && (
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                {sysLoading ? (
+                  <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span className="text-[12px]">Cargando productos del sistema…</span>
+                  </div>
+                ) : sysProds.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 gap-2">
+                    <Package className="w-8 h-8 text-gray-200" />
+                    <p className="text-[12px] text-gray-400">No hay productos en sistema con este proveedor</p>
+                    <p className="text-[11px] text-gray-300">Asigná el proveedor desde la ficha de productos</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-gray-50 text-[11px] text-gray-600 font-bold uppercase tracking-wider border-b border-gray-200">
+                          <th className="text-center px-2 py-2.5 w-8 border-r border-gray-200 text-gray-400">#</th>
+                          <th className="w-10 border-r border-gray-200" />
+                          <th className="text-left px-4 py-2.5 border-r border-gray-200">Producto</th>
+                          <th className="text-right px-4 py-2.5 border-r border-gray-200 w-28">Costo</th>
+                          <th className="text-right px-4 py-2.5 border-r border-gray-200 w-28">Precio</th>
+                          <th className="text-center px-3 py-2.5 border-r border-gray-200 w-20">Margen</th>
+                          <th className="text-center px-3 py-2.5 w-32">Proveedor</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50 text-sm">
+                        {sysProds
+                          .filter(p => !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.sku || '').toLowerCase().includes(search.toLowerCase()))
+                          .slice(currentPage * pageSize, (currentPage + 1) * pageSize)
+                          .map((p, i) => {
+                            const rowNum = currentPage * pageSize + i + 1;
+                            const isChanging = changingId === p.id;
+                            return (
+                              <tr key={p.id} className="hover:bg-blue-50/30 transition-colors group">
+                                <td className="text-center px-2 py-2.5 text-xs text-gray-400 border-r border-gray-100">{rowNum}</td>
+                                {/* Foto */}
+                                <td className="px-1.5 py-1.5 border-r border-gray-100 w-10">
+                                  {(() => {
+                                    const imgSrc = p.image || (p.odooId ? `${ODOO_BASE}/web/image/product.template/${p.odooId}/image_1920` : null);
+                                    return imgSrc ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={imgSrc} alt={p.name} className="w-8 h-8 rounded-lg object-contain border border-gray-100 bg-gray-50" />
+                                    ) : (
+                                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center">
+                                        <ImageIcon className="w-3.5 h-3.5 text-gray-300" />
+                                      </div>
+                                    );
+                                  })()}
+                                </td>
+                                <td className="px-4 py-2.5 border-r border-gray-100">
+                                  <div className="font-medium text-gray-900 text-[12px] line-clamp-2">{p.name}</div>
+                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                    {p.sku && <span className="text-[10px] text-gray-400 font-mono">{p.sku}</span>}
+                                    {p.seiqCategory && <SeiqBadge category={p.seiqCategory} />}
+                                  </div>
+                                  {p.category && <div className="text-[10px] text-gray-400">{p.category}</div>}
+                                </td>
+                                <td className="px-4 py-2.5 text-right border-r border-gray-100 font-mono text-[12px]">
+                                  {p.cost > 0 ? formatARS(p.cost) : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-4 py-2.5 text-right border-r border-gray-100 font-mono text-[12px] font-semibold">
+                                  {p.price > 1 ? formatARS(p.price) : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-center border-r border-gray-100">
+                                  {p.margin !== null ? (
+                                    <span className={cn('text-[11px] font-bold',
+                                      p.margin >= 45 ? 'text-success' :
+                                      p.margin >= 35 ? 'text-warning' : 'text-danger')}>
+                                      {p.margin.toFixed(1)}%
+                                    </span>
+                                  ) : <span className="text-gray-300 text-[11px]">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  {isChanging ? (
+                                    <div className="flex items-center gap-1">
+                                      <select
+                                        value={newSupName}
+                                        onChange={e => setNewSupName(e.target.value)}
+                                        className="flex-1 text-[11px] border border-gray-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-acqua/50"
+                                        autoFocus
+                                      >
+                                        <option value="">— elegir —</option>
+                                        {supplierAllNames.map(n => (
+                                          <option key={n} value={n}>{n}</option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        onClick={() => saveNewSupplier(p.id)}
+                                        disabled={!newSupName}
+                                        className="p-1 rounded bg-success/10 text-success hover:bg-success/20 disabled:opacity-40"
+                                      >
+                                        <Save className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        onClick={() => { setChangingId(null); setNewSupName(''); }}
+                                        className="p-1 rounded text-gray-400 hover:bg-gray-100"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => { setChangingId(p.id); setNewSupName(''); }}
+                                      className="text-[10px] text-gray-400 hover:text-danger opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1 mx-auto"
+                                    >
+                                      <Edit2 className="w-3 h-3" /> Cambiar
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                        })}
+                      </tbody>
+                    </table>
+                    {/* Pagination footer */}
+                    <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-100 bg-gray-50/50">
+                      <div className="flex items-center text-[11px] text-gray-500">
+                        {sysProds.length} productos
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-[11px]">
+                          {([25, 50, 100] as const).map(sz => (
+                            <button key={sz} onClick={() => { setPageSize(sz); setCurrentPage(0); }}
+                              className={cn('px-2.5 py-1.5 border-r border-gray-200 last:border-0 transition-colors',
+                                pageSize === sz ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50')}>
+                              {sz}
+                            </button>
+                          ))}
+                        </div>
+                        <button disabled={currentPage === 0}
+                          onClick={() => setCurrentPage(p => p - 1)}
+                          className="px-2 py-1 text-[11px] border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50">
+                          ‹
+                        </button>
+                        <span className="text-[11px] text-gray-400 min-w-[60px] text-center">
+                          {currentPage + 1} / {Math.max(1, Math.ceil(sysProds.length / pageSize))}
+                        </span>
+                        <button disabled={(currentPage + 1) * pageSize >= sysProds.length}
+                          onClick={() => setCurrentPage(p => p + 1)}
+                          className="px-2 py-1 text-[11px] border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50">
+                          ›
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ─── VISTA TABLA ─── */}
-            {viewMode === 'tabla' && odooSupplier && (
+            {dataSource === 'odoo' && viewMode === 'tabla' && odooSupplier && (
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -2634,7 +3122,8 @@ export default function SupplierDetailPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filtered.slice(0, 60).map((p, i) => {
+                      {filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map((p, i) => {
+                        const rowNum = currentPage * pageSize + i + 1;
                         const isEditing = editingRow === p.si_id;
                         const currentPrice = prices[p.si_id] ?? p.price;
                         const currentNet = currentPrice * (1 - p.discount / 100);
@@ -2651,7 +3140,7 @@ export default function SupplierDetailPage() {
                                 onChange={() => toggleSelect(p.si_id)}
                                 className="w-3.5 h-3.5 rounded accent-acqua cursor-pointer" />
                             </td>
-                            <td className="px-3 py-2 text-[11px] text-gray-400 font-mono">{i + 1}</td>
+                            <td className="px-3 py-2 text-[11px] text-gray-400 font-mono">{rowNum}</td>
                             <td className="px-3 py-2">
                               <div className="flex items-start gap-1.5">
                                 {/* Foto */}
@@ -2740,20 +3229,58 @@ export default function SupplierDetailPage() {
                     </tbody>
                   </table>
                 </div>
-                {filtered.length > 60 && (
-                  <div className="px-4 py-3 text-center border-t border-gray-100 bg-gray-50/50">
-                    <p className="text-[12px] text-gray-400">
-                      Mostrando 60 de {filtered.length} productos.{' '}
-                      <button className="text-acqua font-medium hover:underline">Cargar más</button>
-                    </p>
+                {/* ── Pagination footer ── */}
+                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50 gap-3 flex-wrap">
+                  {/* Stats left */}
+                  <div className="text-[12px] text-gray-500 flex items-center gap-2 flex-wrap">
+                    <span><span className="font-semibold text-gray-700">{productStats.en_sistema}</span> en sistema</span>
+                    <span>·</span>
+                    <span><span className="font-semibold text-warning">{productStats.sin_costo}</span> sin costo</span>
+                    <span>·</span>
+                    <span><span className="font-semibold text-danger">{productStats.no_figura}</span> no figura</span>
                   </div>
-                )}
-                <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/50">
-                  <div className="text-[12px] text-gray-500">
-                    <span className="font-semibold text-gray-700">{productStats.en_sistema}</span> en sistema ·{' '}
-                    <span className="font-semibold text-warning">{productStats.sin_costo}</span> sin costo ·{' '}
-                    <span className="font-semibold text-danger">{productStats.no_figura}</span> no figura
-                  </div>
+
+                  {/* Pagination controls center */}
+                  {filtered.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      {/* Page size selector */}
+                      <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden text-[11px] font-semibold">
+                        {([25, 50, 100] as const).map(sz => (
+                          <button
+                            key={sz}
+                            onClick={() => { setPageSize(sz); setCurrentPage(0); }}
+                            className={cn(
+                              'px-2.5 py-1.5 transition-colors border-r border-gray-200 last:border-0',
+                              pageSize === sz ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50',
+                            )}
+                          >
+                            {sz}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Prev / page info / next */}
+                      <button
+                        disabled={currentPage === 0}
+                        onClick={() => setCurrentPage(p => p - 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30 hover:bg-gray-50 disabled:cursor-not-allowed transition-colors text-[12px] font-bold"
+                      >
+                        ‹
+                      </button>
+                      <span className="text-[12px] text-gray-500 whitespace-nowrap">
+                        {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filtered.length)} de {filtered.length}
+                      </span>
+                      <button
+                        disabled={(currentPage + 1) * pageSize >= filtered.length}
+                        onClick={() => setCurrentPage(p => p + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30 hover:bg-gray-50 disabled:cursor-not-allowed transition-colors text-[12px] font-bold"
+                      >
+                        ›
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Export right */}
                   <button className="flex items-center gap-2 px-3 py-1.5 bg-odoo text-white text-[12px] font-semibold rounded-lg hover:opacity-90">
                     <Download className="w-3.5 h-3.5" /> Export Odoo
                   </button>
@@ -2762,9 +3289,10 @@ export default function SupplierDetailPage() {
             )}
 
             {/* ─── VISTA GRID ─── */}
-            {viewMode === 'grid' && odooSupplier && (
+            {dataSource === 'odoo' && viewMode === 'grid' && odooSupplier && (
+              <div className="space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-3">
-                {filtered.slice(0, 60).map(p => (
+                {filtered.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(p => (
                   <div
                     key={p.si_id}
                     className={cn(
@@ -2849,6 +3377,31 @@ export default function SupplierDetailPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Grid pagination */}
+              {filtered.length > pageSize && (
+                <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex bg-white border border-gray-200 rounded-lg overflow-hidden text-[11px] font-semibold">
+                    {([25, 50, 100] as const).map(sz => (
+                      <button key={sz} onClick={() => { setPageSize(sz); setCurrentPage(0); }}
+                        className={cn('px-2.5 py-1.5 border-r border-gray-200 last:border-0 transition-colors',
+                          pageSize === sz ? 'bg-gray-800 text-white' : 'text-gray-500 hover:bg-gray-50')}>
+                        {sz}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button disabled={currentPage === 0} onClick={() => setCurrentPage(p => p - 1)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30 hover:bg-gray-50 disabled:cursor-not-allowed text-[12px] font-bold">‹</button>
+                    <span className="text-[12px] text-gray-500 whitespace-nowrap">
+                      {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filtered.length)} de {filtered.length}
+                    </span>
+                    <button disabled={(currentPage + 1) * pageSize >= filtered.length} onClick={() => setCurrentPage(p => p + 1)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30 hover:bg-gray-50 disabled:cursor-not-allowed text-[12px] font-bold">›</button>
+                  </div>
+                </div>
+              )}
               </div>
             )}
 

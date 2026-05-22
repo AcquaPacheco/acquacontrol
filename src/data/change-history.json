@@ -1,1 +1,292 @@
-[]
+[
+  {
+    "productId": "__export__.product_template_2455_731e56ad",
+    "productName": "Boya Dosificadora de Cloro c/termometro - Colors - Vulcano",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 9216,
+    "source": "manual",
+    "id": "h_1779403090027_cgo9f",
+    "timestamp": "2026-05-21T22:38:10.027Z"
+  },
+  {
+    "productId": "__export__.product_template_10730_01cf74a9",
+    "productName": "Balde x 12Lts c/Manija Ref. - Romyl",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 2508,
+    "source": "manual",
+    "id": "h_1779315426145_hbcea",
+    "timestamp": "2026-05-20T22:17:06.145Z"
+  },
+  {
+    "productId": "__export__.product_template_3057_fbc5b69d",
+    "productName": "Guantes Silicona Para Lavar Platos/Cocina/Baños/Mascotas - Lics",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 8520,
+    "source": "manual",
+    "id": "h_1779315372007_y9wzt",
+    "timestamp": "2026-05-20T22:16:12.007Z"
+  },
+  {
+    "productId": "__export__.product_template_10968_feddf1d3",
+    "productName": "DoyPack Transparente - Nagura",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 369,
+    "source": "manual",
+    "id": "h_1779140758245_6ntwi",
+    "timestamp": "2026-05-18T21:45:58.245Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 46870,
+    "newValue": 54334,
+    "source": "manual",
+    "id": "h_1779137243654_63tuf",
+    "timestamp": "2026-05-18T20:47:23.654Z"
+  },
+  {
+    "productId": "__export__.product_template_10871_5787aa3e",
+    "productName": "Pasta Suavizante - Maxus",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 41040,
+    "source": "manual",
+    "id": "h_1779137236933_t9tnz",
+    "timestamp": "2026-05-18T20:47:16.933Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 45416,
+    "newValue": 46870,
+    "source": "manual",
+    "id": "h_1779137225758_jyr2h",
+    "timestamp": "2026-05-18T20:47:05.758Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 45000,
+    "newValue": 45416,
+    "source": "manual",
+    "id": "h_1779137211733_izfhy",
+    "timestamp": "2026-05-18T20:46:51.733Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "cost",
+    "oldValue": 37120,
+    "newValue": 37472,
+    "source": "manual",
+    "id": "h_1779137211733_b8ym5",
+    "timestamp": "2026-05-18T20:46:51.733Z"
+  },
+  {
+    "productId": "__export__.product_template_10868_5ede71f8",
+    "productName": "Pasta Jabón Líquido - ORIGINAL",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 37120,
+    "source": "manual",
+    "id": "h_1779137195822_2qkfy",
+    "timestamp": "2026-05-18T20:46:35.822Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 6681719,
+    "newValue": 45000,
+    "source": "manual",
+    "id": "h_1779137185799_andku",
+    "timestamp": "2026-05-18T20:46:25.799Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "cost",
+    "oldValue": 3712066,
+    "newValue": 37120,
+    "source": "manual",
+    "id": "h_1779137154104_6rzwi",
+    "timestamp": "2026-05-18T20:45:54.104Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 66802,
+    "newValue": 6681719,
+    "source": "manual",
+    "id": "h_1779137116790_9gzwx",
+    "timestamp": "2026-05-18T20:45:16.790Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "cost",
+    "oldValue": 37120.66,
+    "newValue": 3712066,
+    "source": "manual",
+    "id": "h_1779137116790_85c8q",
+    "timestamp": "2026-05-18T20:45:16.790Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "cost",
+    "oldValue": 3712066,
+    "newValue": 37120.66,
+    "source": "manual",
+    "id": "h_1779137109487_04fn8",
+    "timestamp": "2026-05-18T20:45:09.487Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "price",
+    "oldValue": 253510,
+    "newValue": 66802,
+    "source": "manual",
+    "id": "h_1779137089189_jirw7",
+    "timestamp": "2026-05-18T20:44:49.189Z"
+  },
+  {
+    "productId": "__export__.product_template_10877_8c00ac46",
+    "productName": "Pasta Detergente - Maxus",
+    "field": "cost",
+    "oldValue": 0,
+    "newValue": 3712066,
+    "source": "manual",
+    "id": "h_1779137075421_7f7nv",
+    "timestamp": "2026-05-18T20:44:35.421Z"
+  },
+  {
+    "productId": "__export__.product_template_3085_42f1bc1e",
+    "productName": "Jabon De Mano x Lt - Vainilla&Coco - Acqua",
+    "field": "cost",
+    "oldValue": 6586,
+    "newValue": 1190,
+    "source": "manual",
+    "id": "h_1779136970725_hyq4g",
+    "timestamp": "2026-05-18T20:42:50.725Z"
+  },
+  {
+    "productId": "__export__.product_template_3085_42f1bc1e",
+    "productName": "Jabon De Mano x Lt - Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 3330,
+    "newValue": 3600,
+    "source": "manual",
+    "id": "h_1779136965222_8atbh",
+    "timestamp": "2026-05-18T20:42:45.222Z"
+  },
+  {
+    "productId": "__export__.product_template_10891_a5906593",
+    "productName": "Jabon De Mano x Lt - Manzana - Acqua",
+    "field": "price",
+    "oldValue": 3330,
+    "newValue": 3600,
+    "source": "manual",
+    "id": "h_1779136959186_sognj",
+    "timestamp": "2026-05-18T20:42:39.186Z"
+  },
+  {
+    "productId": "__export__.product_template_10895_0e9508d6",
+    "productName": "Jabon De Mano x Lt - Antibacterial - Acqua",
+    "field": "price",
+    "oldValue": 3330,
+    "newValue": 3600,
+    "source": "manual",
+    "id": "h_1779136948581_gp89x",
+    "timestamp": "2026-05-18T20:42:28.581Z"
+  },
+  {
+    "productId": "__export__.product_template_10893_f731b140",
+    "productName": "Jabon De Mano x Lt - Blanco - Acqua",
+    "field": "price",
+    "oldValue": 3330,
+    "newValue": 3600,
+    "source": "manual",
+    "id": "h_1779136943048_etul7",
+    "timestamp": "2026-05-18T20:42:23.048Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 87084,
+    "newValue": 12400,
+    "source": "manual",
+    "id": "h_1779136915869_eohjw",
+    "timestamp": "2026-05-18T20:41:55.869Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 12382,
+    "newValue": 87084,
+    "source": "manual",
+    "id": "h_1779136868730_bvrwu",
+    "timestamp": "2026-05-18T20:41:08.730Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 87207,
+    "newValue": 12382,
+    "source": "manual",
+    "id": "h_1779136857919_sze07",
+    "timestamp": "2026-05-18T20:40:57.919Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 23397,
+    "newValue": 87207,
+    "source": "manual",
+    "id": "h_1779136849671_cmeeh",
+    "timestamp": "2026-05-18T20:40:49.671Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "cost",
+    "oldValue": 1100,
+    "newValue": 4100,
+    "source": "manual",
+    "id": "h_1779136849671_o1xgz",
+    "timestamp": "2026-05-18T20:40:49.671Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "price",
+    "oldValue": 12400,
+    "newValue": 23397,
+    "source": "manual",
+    "id": "h_1779136834450_l2v4y",
+    "timestamp": "2026-05-18T20:40:34.450Z"
+  },
+  {
+    "productId": "__export__.product_template_10751_0b698f7c",
+    "productName": "Jabon De Mano x 5Lts- Vainilla&Coco - Acqua",
+    "field": "cost",
+    "oldValue": 4100,
+    "newValue": 1100,
+    "source": "manual",
+    "id": "h_1779136819093_2sjgx",
+    "timestamp": "2026-05-18T20:40:19.093Z"
+  }
+]

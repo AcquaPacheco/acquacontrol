@@ -430,8 +430,10 @@ function parseMLShipping(s: string): { freeShipping: boolean; isFull: boolean } 
 /** Normalize ML status string to lowercase internal value */
 function normalizeMLStatus(s: string): string {
   const lower = String(s ?? '').toLowerCase().trim();
-  if (lower.includes('activ')) return 'active';
-  if (lower.includes('paus'))  return 'paused';
+  // Check 'inactiv' BEFORE 'activ' — "inactiva" contains "activ" which would false-match
+  if (lower.includes('inactiv')) return 'inactive';
+  if (lower.includes('activ'))   return 'active';
+  if (lower.includes('paus'))    return 'paused';
   if (lower.includes('cerr') || lower.includes('close')) return 'closed';
   return lower || 'unknown';
 }
@@ -445,6 +447,7 @@ export function parseMLRows(rows: unknown[][]): MLPublication[] {
     // Row 0: English column keys; rows 1-5: metadata; row 6+: data
     const headers = rows[0].map(h => String(h ?? '').toUpperCase());
     const iItemId    = headers.indexOf('ITEM_ID');
+    const iFamilyId  = headers.indexOf('FAMILY_ID');
     const iSku       = headers.indexOf('SKU');
     const iTitle     = headers.indexOf('TITLE');
     const iQuantity  = headers.indexOf('QUANTITY');
@@ -455,7 +458,8 @@ export function parseMLRows(rows: unknown[][]): MLPublication[] {
     const iFee       = headers.indexOf('FEE_PER_SALE_MARKETPLACE_V2');
     const iListType  = headers.indexOf('LISTING_TYPE_V3');
     const iFinancing = headers.indexOf('COST_OF_FINANCING_MARKETPLACE');
-    const iCategory  = headers.indexOf('CATEGORY');
+    const iCategory    = headers.indexOf('CATEGORY');
+    const iDescription = headers.indexOf('DESCRIPTION');
 
     const dataRows = rows.slice(6); // skip 6 header/metadata rows
 
@@ -469,8 +473,12 @@ export function parseMLRows(rows: unknown[][]): MLPublication[] {
       const { pct: commissionPct, fixed: commissionFixed } = parseMLFee(feeStr);
       const shipping    = parseMLShipping(get(iShipping));
       const listType    = get(iListType).trim();
-      const hasInstallments = listType.toLowerCase() !== 'no agregar cuotas' && listType !== '';
+      // hasInstallments: true when cuotas cost > 0, OR listing type mentions cuotas
       const financingPct = iFinancing >= 0 ? parseFloat(String(row[iFinancing] ?? '').replace('%', '').trim()) || 0 : 0;
+      const hasInstallments = financingPct > 0 || (listType.toLowerCase() !== 'no agregar cuotas' && listType !== '');
+      const familyId    = get(iFamilyId) || undefined;
+      const mlCategory  = get(iCategory) || undefined;
+      const description = iDescription >= 0 ? String(row[iDescription] ?? '').trim() || undefined : undefined;
 
       const rawObj: Record<string, unknown> = {};
       rows[0].forEach((h, i) => { rawObj[String(h)] = row[i]; });
@@ -491,13 +499,15 @@ export function parseMLRows(rows: unknown[][]): MLPublication[] {
         sku:             get(iSku) || undefined,
         condition:       get(iCondition).toLowerCase() || undefined,
         thumbnail:       undefined,
+        familyId,
+        mlCategory,
+        description,
         // Store commission info in raw for the engine to use
         raw: {
           ...rawObj,
           _commissionPct:   commissionPct,
           _commissionFixed: commissionFixed,
           _financingPct:    financingPct,
-          _category:        get(iCategory),
         },
       }] as MLPublication[];
     });
@@ -607,7 +617,7 @@ export function calcProfitability(
     grossProfit: netRevenue - cost,
     netProfit,
     netMargin,
-    markup: markupPct,
+    markup: Math.round(markupPct),        // siempre entero
     odooListMarkup: price / 1.21,
     status: netMargin >= p.minMargin ? 'rentable'
           : netMargin >= 0           ? 'bajo_margen'
@@ -660,8 +670,9 @@ export function generateAlerts(product: MLLabProduct, params: MLProductParams): 
     const diff = Math.abs((product.mlPrice - product.odooListML) / product.odooListML) * 100;
     alerts.push({ type: 'warning', code: 'precio_desalineado', message: `Precio ML (${ars(product.mlPrice)}) vs. calculado (${ars(product.odooListML)}) — diferencia ${diff.toFixed(0)}%.`, priority: 3 });
   }
-  if (product.mlStatus && product.mlStatus !== 'active' && product.mlStatus !== 'activo') {
-    alerts.push({ type: 'info', code: 'no_activa', message: `Publicación ${product.mlStatus} — no visible en ML.`, priority: 4 });
+  if (product.mlStatus && product.mlStatus !== 'active') {
+    const label = product.mlStatus === 'inactive' ? 'inactiva' : product.mlStatus === 'paused' ? 'pausada' : product.mlStatus;
+    alerts.push({ type: 'warning', code: 'no_activa', message: `Publicación ${label} — no visible en ML.`, priority: 2 });
   }
   if (product.syncStatus === 'sin_publicacion') {
     alerts.push({ type: 'info', code: 'sin_publicacion', message: 'Tiene regla de precio Odoo pero no está publicado en ML.', priority: 3 });
@@ -766,6 +777,13 @@ export function matchAndBuild(
   const products: MLLabProduct[] = [];
   const matchedMLIds = new Set<string>();
 
+  // ── Build familyId → count map for catalog duplicate detection ────
+  // Any familyId that appears more than once means the same product has multiple listings (catalog)
+  const familyIdCount = new Map<string, number>();
+  for (const pub of mlPubs) {
+    if (pub.familyId) familyIdCount.set(pub.familyId, (familyIdCount.get(pub.familyId) ?? 0) + 1);
+  }
+
   // ── Process Odoo rules ────────────────────────────────────────────
   for (const rule of odooRules) {
     // 1. Enrich from system products
@@ -857,6 +875,11 @@ export function matchAndBuild(
       }
     }
 
+    // Check if the matched pub's familyId has multiple listings (catalog duplicate)
+    if (mlPub?.familyId && (familyIdCount.get(mlPub.familyId) ?? 0) > 1) {
+      isDuplicate = true;
+    }
+
     // Determine sync status
     const syncStatus: MLSyncStatus = determineSyncStatus({
       hasCost: cost > 0,
@@ -882,6 +905,14 @@ export function matchAndBuild(
     const mlCommFixed = mlPub?.raw?._commissionFixed as number | undefined;
     if (mlCommPct   && mlCommPct   > 0) { mergedParams.commission = mlCommPct;   productParamsOverride.commission = mlCommPct; }
     if (mlCommFixed && mlCommFixed > 0) { mergedParams.fixedFee   = mlCommFixed; productParamsOverride.fixedFee   = mlCommFixed; }
+
+    // Auto-apply installments cost when ML export says the product has active cuotas
+    // and the user hasn't manually set a specific installmentsCost (i.e. it's still 0)
+    if (mlPub?.hasInstallments && mergedParams.installmentsCost === 0) {
+      const autoInstall = mergedParams.defaultInstallmentsCost ?? 9.3;
+      mergedParams.installmentsCost = autoInstall;
+      productParamsOverride.installmentsCost = autoInstall;
+    }
 
     const calc     = mlPub?.price ? calcProfitability(mlPub.price, cost, mergedParams) ?? undefined : undefined;
     const calcIdeal = cost > 0 ? (() => {
@@ -917,6 +948,9 @@ export function matchAndBuild(
       mlPermalink: mlPub?.permalink,
       mlCondition: mlPub?.condition,
       mlThumbnail: mlPub?.thumbnail,
+      mlFamilyId: mlPub?.familyId,
+      mlCategory: mlPub?.mlCategory ?? category,
+      mlDescription: mlPub?.description,
       syncStatus,
       matchConfidence: confidence,
       matchMethod: matchMethod || undefined,
@@ -935,9 +969,10 @@ export function matchAndBuild(
   }
 
   // ── Unmatched ML publications (no Odoo rule) ──────────────────────
-  // By default excluded — Odoo pricelist is the source of truth.
-  // Pass options.includeOrphans = true to include them for inspection.
-  if (!options?.includeOrphans) return products;
+  // Always included — ML export is the primary data source.
+  // The Odoo pricelist is optional (enriches with markup data when available).
+  // Respect options.includeOrphans = false only when caller explicitly opts out.
+  if (options?.includeOrphans === false) return products;
 
   for (const mlPub of mlPubs) {
     if (matchedMLIds.has(mlPub.mlItemId)) continue;
@@ -951,13 +986,33 @@ export function matchAndBuild(
 
     const cost  = sys?.cost ?? 0;
     const stock = sys?.stock ?? 0;
+    // back-calculate markup from ML price and cost (since we have no Odoo rule)
+    const backCalcMarkup = cost > 0 && mlPub.price > 0
+      ? Math.round(((mlPub.price / 1.21 / cost) - 1) * 100)   // siempre entero
+      : 0;
+
     const mergedParams = { ...globalParams };
-    if (mlPub.freeShipping) mergedParams.shippingCost = estimateShipping();
+    const productParamsOverride: Partial<MLProductParams> = {};
+    if (mlPub.freeShipping) {
+      mergedParams.shippingCost = estimateShipping();
+      productParamsOverride.shippingCost = estimateShipping();
+    }
     const mlCommPct2   = mlPub.raw?._commissionPct as number | undefined;
     const mlCommFixed2 = mlPub.raw?._commissionFixed as number | undefined;
-    if (mlCommPct2   && mlCommPct2   > 0) mergedParams.commission = mlCommPct2;
-    if (mlCommFixed2 && mlCommFixed2 > 0) mergedParams.fixedFee   = mlCommFixed2;
+    if (mlCommPct2   && mlCommPct2   > 0) { mergedParams.commission = mlCommPct2;   productParamsOverride.commission = mlCommPct2; }
+    if (mlCommFixed2 && mlCommFixed2 > 0) { mergedParams.fixedFee   = mlCommFixed2; productParamsOverride.fixedFee   = mlCommFixed2; }
+    if (mlPub.hasInstallments && mergedParams.installmentsCost === 0) {
+      const autoInstall = mergedParams.defaultInstallmentsCost ?? 9.3;
+      mergedParams.installmentsCost = autoInstall;
+      productParamsOverride.installmentsCost = autoInstall;
+    }
 
+    // Catalog duplicate: familyId shared with another pub
+    const isCatalogDup = mlPub.familyId ? (familyIdCount.get(mlPub.familyId) ?? 0) > 1 : false;
+    const calcIdeal = cost > 0 ? (() => {
+      const ip = calcIdealPrice(cost, mergedParams.idealMargin, mergedParams);
+      return calcProfitability(ip, cost, mergedParams) ?? undefined;
+    })() : undefined;
     const calc = cost > 0 ? calcProfitability(mlPub.price, cost, mergedParams) ?? undefined : undefined;
 
     const partial: MLLabProduct = {
@@ -965,13 +1020,13 @@ export function matchAndBuild(
       sku: mlPub.sku,
       name: mlPub.title,
       cost,
-      markup: 0,
-      odooPrice: 0,
-      odooListML: 0,
+      markup: backCalcMarkup,
+      odooPrice: mlPub.price > 0 ? mlPub.price / 1.21 : 0,
+      odooListML: mlPub.price,
       stock,
       image: sys?.image ?? undefined,
       supplier: sys?.supplierName ?? undefined,
-      category: sys?.category ?? undefined,
+      category: mlPub.mlCategory ?? sys?.category ?? undefined,
       mlItemId: mlPub.mlItemId,
       mlTitle: mlPub.title,
       mlPrice: mlPub.price,
@@ -986,9 +1041,14 @@ export function matchAndBuild(
       mlPermalink: mlPub.permalink,
       mlCondition: mlPub.condition,
       mlThumbnail: mlPub.thumbnail,
-      syncStatus: 'sin_regla_odoo',
+      mlFamilyId: mlPub.familyId,
+      mlCategory: mlPub.mlCategory ?? sys?.category ?? undefined,
+      mlDescription: mlPub.description,
+      syncStatus: isCatalogDup ? 'duplicado' : 'sin_regla_odoo',
       matchConfidence: 0,
+      params: Object.keys(productParamsOverride).length > 0 ? productParamsOverride : undefined,
       calc,
+      calcIdeal,
       alerts: [],
       createdAt: now,
       updatedAt: now,
@@ -1095,7 +1155,7 @@ export function generateScenarios(product: MLLabProduct, globalParams: MLProduct
     const currentCalc = currentPrice > 0 ? calcProfitability(currentPrice, cost, base) : null;
 
     const recommendedMarkup = calc
-      ? (price / 1.21 / effectiveCost - 1) * 100
+      ? Math.round((price / 1.21 / effectiveCost - 1) * 100)   // siempre entero
       : null;
 
     const vsActualMargin = (calc && currentCalc)
@@ -1226,7 +1286,7 @@ export function generateConsultantReport(
   }
   recommendedPriceFinal = roundToN(recommendedPriceFinal, p.roundTo);
 
-  const idealMarkup     = recommendedPriceFinal > 0 && cost > 0 ? (recommendedPriceFinal / 1.21 / cost - 1) * 100 : 0;
+  const idealMarkup     = recommendedPriceFinal > 0 && cost > 0 ? Math.round((recommendedPriceFinal / 1.21 / cost - 1) * 100) : 0;
   const idealCalc       = idealPrice > 0 ? calcProfitability(idealPrice, cost, p) : null;
   const recommendedCalc = recommendedPriceFinal > 0 ? calcProfitability(recommendedPriceFinal, cost, p) : idealCalc;
 
@@ -1257,16 +1317,16 @@ export function generateConsultantReport(
   // 9. Acción principal — condiciones primero, precio solo cuando es urgente
   let trialAction = '';
   if (!mlPrice || !product.mlItemId) {
-    const newMkp = recommendedPriceFinal > 0 && cost > 0 ? (recommendedPriceFinal / 1.21 / cost - 1) * 100 : 0;
-    trialAction = `Creá la publicación con precio ${ars(recommendedPriceFinal)} (markup ${newMkp.toFixed(1)}%), envío gratis y 6 cuotas sin interés si el margen lo permite.`;
+    const newMkp = recommendedPriceFinal > 0 && cost > 0 ? Math.round((recommendedPriceFinal / 1.21 / cost - 1) * 100) : 0;
+    trialAction = `Creá la publicación con precio ${ars(recommendedPriceFinal)} (markup ${newMkp}%), envío gratis y 6 cuotas sin interés si el margen lo permite.`;
   } else if (calc?.status === 'pierde') {
     if (marketAvgPrice && minViablePrice > marketAvgPrice) {
       trialAction = `El mercado (${ars(marketAvgPrice)}) está por debajo de tu punto de equilibrio (${ars(minViablePrice)}). Negociá mejor costo con el proveedor o pausá el producto.`;
     } else {
-      trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup.toFixed(1)}%) para dejar de perder dinero. Mantené las demás condiciones.`;
+      trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup}%) para dejar de perder dinero. Mantené las demás condiciones.`;
     }
   } else if (calc?.status === 'bajo_margen') {
-    trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup.toFixed(1)}%) → margen estimado ${recommendedCalc?.netMargin.toFixed(1) ?? '—'}%. El precio actual no cubre los costos adecuadamente.`;
+    trialAction = `Subí el precio a ${ars(recommendedPriceFinal)} (markup ${idealMarkup}%) → margen estimado ${recommendedCalc?.netMargin.toFixed(1) ?? '—'}%. El precio actual no cubre los costos adecuadamente.`;
   } else if (missingConditions.length > 0) {
     // Rentable pero le faltan condiciones
     trialAction = `Precio rentable (${calc?.netMargin.toFixed(1)}% margen). La clave para vender más es ${missingConditions.join(' y ')}. Activalos y medí el impacto en visitas en 7 días.`;
@@ -1346,7 +1406,7 @@ export function buildOdooExportRows(products: MLLabProduct[], globalParams: MLPr
   const rows = products.map(p => {
     const params = { ...globalParams, ...p.params };
     const idealPrice  = p.cost > 0 ? calcIdealPrice(p.cost, params.idealMargin, params) : 0;
-    const idealMarkup = idealPrice > 0 && p.cost > 0 ? (idealPrice / 1.21 / p.cost - 1) * 100 : 0;
+    const idealMarkup = idealPrice > 0 && p.cost > 0 ? Math.round((idealPrice / 1.21 / p.cost - 1) * 100) : 0;
     const calc = p.calc;
 
     return [
@@ -1354,8 +1414,8 @@ export function buildOdooExportRows(products: MLLabProduct[], globalParams: MLPr
       p.sku ?? '',
       p.name,
       p.cost > 0 ? p.cost.toFixed(2) : '',
-      p.markup > 0 ? p.markup.toFixed(2) : '',
-      idealMarkup > 0 ? idealMarkup.toFixed(2) : '',
+      p.markup > 0 ? String(p.markup) : '',
+      idealMarkup > 0 ? String(idealMarkup) : '',
       p.mlPrice ? p.mlPrice.toFixed(2) : '',
       idealPrice > 0 ? idealPrice.toFixed(2) : '',
       calc?.netMargin ? calc.netMargin.toFixed(2) : '',

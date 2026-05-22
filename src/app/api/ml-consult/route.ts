@@ -1,73 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Gemini helper — streaming via REST (sin dependencia extra)
-// ─────────────────────────────────────────────────────────────────────────────
-const GEMINI_MODEL = 'gemini-2.0-flash';
-
-interface GeminiPart   { text: string }
-interface GeminiContent { role: 'user' | 'model'; parts: GeminiPart[] }
-
-async function streamGemini(
-  apiKey: string,
-  systemPrompt: string,
-  messages: GeminiContent[],
-  maxTokens = 512,
-): Promise<ReadableStream<Uint8Array>> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents: messages,
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
-    }),
-  });
-
-  if (!response.ok || !response.body) {
-    const err = await response.text().catch(() => response.statusText);
-    throw new Error(`Gemini ${response.status}: ${err}`);
-  }
-
-  const body = response.body;
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const reader  = body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          // Procesar líneas SSE completas
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const json = line.slice(6).trim();
-            if (!json || json === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(json) as {
-                candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-              };
-              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) controller.enqueue(new TextEncoder().encode(text));
-            } catch { /* ignorar chunks incompletos */ }
-          }
-        }
-      } finally {
-        controller.close();
-      }
-    },
-  });
-}
+import { streamGemini, type GeminiContent } from '@/lib/gemini';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -251,13 +183,15 @@ export async function POST(req: NextRequest) {
   );
 
   // Convertir mensajes al formato Gemini (assistant → model)
+  // normalizeHistory (dentro de streamGemini) descarta turnos 'model' al inicio
+  // y fusiona turnos consecutivos del mismo rol.
   const geminiMessages: GeminiContent[] = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
 
   try {
-    const stream = await streamGemini(apiKey, systemPrompt, geminiMessages, 512);
+    const stream = await streamGemini(apiKey, systemPrompt, geminiMessages, { maxTokens: 512 });
 
     return new Response(stream, {
       headers: {

@@ -2,14 +2,12 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useColumnResize } from '@/lib/use-column-resize';
-import productsData from '@/data/products.json';
-import suppliersContactsRaw from '@/data/suppliers.json';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import {
   DollarSign, AlertTriangle, CheckCircle2, ArrowRight,
   Search, X, Users, BarChart3, Package, Lightbulb,
-  TrendingDown, TrendingUp, ChevronRight,
+  TrendingDown, RefreshCw, ChevronRight, Edit2, Check,
 } from 'lucide-react';
 
 // ── Tipos
@@ -17,28 +15,21 @@ interface RealProduct {
   id: string; sku: string | null; name: string;
   cost: number; price: number; margin: number | null;
   image: string | null; supplierName: string | null;
-  category: string | null; active: boolean;
+  category: string | null; active: boolean; hidden?: boolean;
 }
 
-const realProducts   = productsData as unknown as RealProduct[];
-const activeProducts = realProducts.filter(p => p.active !== false);
+interface RawSupplier { name: string; slug?: string; active?: boolean; [k: string]: unknown; }
 
-// ── Stats por proveedor (datos reales)
+// ── Stats por proveedor
 interface SupplierCostStat {
-  name: string;
-  slug: string;
-  total: number;
-  sinCosto: number;
-  sinPrecio: number;
-  conCosto: number;
-  completitud: number; // %
-  avgMargin: number | null;
-  worstMargin: number | null;
+  name: string; slug: string; total: number; sinCosto: number;
+  sinPrecio: number; conCosto: number; completitud: number;
+  avgMargin: number | null; worstMargin: number | null;
 }
 
-function buildSupplierStats(): SupplierCostStat[] {
+function buildSupplierStats(products: RealProduct[], suppliers: RawSupplier[]): SupplierCostStat[] {
   const map = new Map<string, { total: number; sinCosto: number; sinPrecio: number; margins: number[] }>();
-  activeProducts.forEach(p => {
+  products.forEach(p => {
     if (!p.supplierName) return;
     if (!map.has(p.supplierName)) map.set(p.supplierName, { total: 0, sinCosto: 0, sinPrecio: 0, margins: [] });
     const s = map.get(p.supplierName)!;
@@ -47,33 +38,135 @@ function buildSupplierStats(): SupplierCostStat[] {
     if (!p.price || p.price <= 1) s.sinPrecio++;
     if (p.margin !== null && p.price > 1 && p.cost > 0) s.margins.push(p.margin);
   });
-
-  const contacts = suppliersContactsRaw as unknown as Array<{ name: string; slug: string }>;
-  const slugMap  = new Map(contacts.map(c => [c.name, c.slug]));
-
+  const slugMap = new Map(suppliers.map(c => [c.name, c.slug]));
   return Array.from(map.entries())
     .map(([name, s]) => ({
       name,
       slug: slugMap.get(name) || name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-      total:        s.total,
-      sinCosto:     s.sinCosto,
-      sinPrecio:    s.sinPrecio,
-      conCosto:     s.total - s.sinCosto,
-      completitud:  Math.round((s.total - s.sinCosto) / s.total * 100),
-      avgMargin:    s.margins.length ? Math.round(s.margins.reduce((a, b) => a + b, 0) / s.margins.length) : null,
-      worstMargin:  s.margins.length ? Math.round(Math.min(...s.margins)) : null,
+      total: s.total, sinCosto: s.sinCosto, sinPrecio: s.sinPrecio,
+      conCosto: s.total - s.sinCosto,
+      completitud: Math.round((s.total - s.sinCosto) / s.total * 100),
+      avgMargin: s.margins.length ? Math.round(s.margins.reduce((a, b) => a + b, 0) / s.margins.length) : null,
+      worstMargin: s.margins.length ? Math.round(Math.min(...s.margins)) : null,
     }))
     .sort((a, b) => b.sinCosto - a.sinCosto);
 }
 
-const supplierStats = buildSupplierStats();
-
 type TabKey = 'resumen' | 'por_proveedor' | 'sin_costo' | 'margen_bajo';
+
+// ── Formateo de ARS (reutilizable en la página)
+function fmtARS(n: number) {
+  return new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
+}
 
 export default function CostosPage() {
   const [tab, setTab]     = useState<TabKey>('resumen');
   const [search, setSearch] = useState('');
   const [activeFilterBanner, setActiveFilterBanner] = useState<string | null>(null);
+
+  // ── Datos dinámicos (fetched on mount, refresh on demand) ─────────────────
+  const [rawProducts,  setRawProducts]  = useState<RealProduct[]>([]);
+  const [rawSuppliers, setRawSuppliers] = useState<RawSupplier[]>([]);
+  const [loading,      setLoading]      = useState(true);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [prods, sups] = await Promise.all([
+        fetch('/api/products?showHidden=true').then(r => r.json() as Promise<RealProduct[]>),
+        fetch('/api/suppliers').then(r => r.json() as Promise<RawSupplier[]>),
+      ]);
+      setRawProducts(prods);
+      setRawSuppliers(sups);
+    } catch { /* silencioso */ }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { loadData(); }, []);
+
+  // ── Productos activos: excluye active=false Y hidden=true ─────────────────
+  const activeProducts = useMemo(
+    () => rawProducts.filter(p => p.active !== false && p.hidden !== true),
+    [rawProducts],
+  );
+
+  // ── Stats por proveedor — reactivo a activeProducts ───────────────────────
+  const supplierStats = useMemo(
+    () => buildSupplierStats(activeProducts, rawSuppliers),
+    [activeProducts, rawSuppliers],
+  );
+
+  // ── Edición inline de costos y markup ─────────────────────────────────────
+  const [edits,      setEdits]      = useState<Record<string, { cost?: number; price?: number }>>({});
+  const [editingId,  setEditingId]  = useState<string | null>(null);
+  const [editField,  setEditField]  = useState<'cost' | 'markup' | 'price' | null>(null);
+  const [editVal,    setEditVal]    = useState('');
+  const [saving,     setSaving]     = useState(false);
+  const [savedId,    setSavedId]    = useState<string | null>(null);
+
+  // Productos con edits locales aplicados (para que la tabla se actualice sin recargar)
+  const effectiveProds = useMemo(() => activeProducts.map(p => {
+    const e = edits[p.id];
+    if (!e) return p;
+    const cost  = e.cost  ?? p.cost;
+    const price = e.price ?? p.price;
+    const margin = price > 1 && cost > 0
+      ? Math.round(((price - cost) / price) * 1000) / 10
+      : p.margin;
+    return { ...p, cost, price, margin };
+  }), [edits]);
+
+  const startEdit = (id: string, field: 'cost' | 'markup' | 'price', currentVal: number) => {
+    setEditingId(id);
+    setEditField(field);
+    if (field === 'markup') {
+      setEditVal(currentVal > 0 ? currentVal.toFixed(1) : '');
+    } else {
+      setEditVal(currentVal > 0 ? String(currentVal) : '');
+    }
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditField(null); setEditVal(''); };
+
+  const saveEdit = async (product: RealProduct) => {
+    const raw = parseFloat(editVal.replace(/\./g, '').replace(',', '.'));
+    if (!raw || isNaN(raw) || raw <= 0) { cancelEdit(); return; }
+
+    let patchBody: Record<string, unknown> = { id: product.id, source: 'costos_inline' };
+    let localUpdate: { cost?: number; price?: number } = {};
+
+    if (editField === 'cost') {
+      patchBody.cost = raw;
+      localUpdate = { cost: raw };
+    } else if (editField === 'price') {
+      patchBody.price = raw;
+      localUpdate = { price: raw };
+    } else if (editField === 'markup') {
+      // markup% → nuevo precio = costo × (1 + markup/100)
+      const effectiveCost = (edits[product.id]?.cost ?? product.cost);
+      if (!effectiveCost) { cancelEdit(); return; }
+      const newPrice = Math.round(effectiveCost * (1 + raw / 100));
+      patchBody.price = newPrice;
+      localUpdate = { price: newPrice };
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch('/api/products', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patchBody),
+      });
+      const data = await res.json() as { ok: boolean };
+      if (data.ok) {
+        setEdits(prev => ({ ...prev, [product.id]: { ...(prev[product.id] ?? {}), ...localUpdate } }));
+        setSavedId(product.id);
+        setTimeout(() => setSavedId(null), 2000);
+      }
+    } finally {
+      setSaving(false);
+      cancelEdit();
+    }
+  };
 
   const { widths: colW, startResize } = useColumnResize({
     proveedor: 220, total: 80, conCosto: 90, sinCosto: 90, completitud: 140, margenProm: 110, peorMargen: 110, accion: 90,
@@ -90,12 +183,12 @@ export default function CostosPage() {
     }
   }, []);
 
-  // Stats globales
+  // Stats globales — reactivas a activeProducts, effectiveProds y supplierStats
   const stats = useMemo(() => {
-    const sinCostoProds   = activeProducts.filter(p => !p.cost || p.cost === 0);
-    const sinPrecioProds  = activeProducts.filter(p => !p.price || p.price <= 1);
-    const marginBajoProds = activeProducts.filter(p => p.margin !== null && p.margin < 35 && p.price > 1 && p.cost > 0);
-    const withMargin      = activeProducts.filter(p => p.margin !== null && p.price > 1 && p.cost > 0);
+    const sinCostoProds   = effectiveProds.filter(p => !p.cost || p.cost === 0);
+    const sinPrecioProds  = effectiveProds.filter(p => !p.price || p.price <= 1);
+    const marginBajoProds = effectiveProds.filter(p => p.margin !== null && p.margin < 35 && p.price > 1 && p.cost > 0);
+    const withMargin      = effectiveProds.filter(p => p.margin !== null && p.price > 1 && p.cost > 0);
     const avg = withMargin.length
       ? Math.round(withMargin.reduce((s, p) => s + p.margin!, 0) / withMargin.length * 10) / 10
       : 0;
@@ -108,11 +201,11 @@ export default function CostosPage() {
       provCriticos:  supplierStats.filter(s => s.sinCosto > 0).length,
       provCompletos: supplierStats.filter(s => s.sinCosto === 0).length,
     };
-  }, []);
+  }, [activeProducts, effectiveProds, supplierStats]);
 
-  // Filtros de búsqueda
+  // Filtros de búsqueda — usan effectiveProds para reflejar edits locales
   const filteredSinCosto = useMemo(() => {
-    const base = activeProducts.filter(p => !p.cost || p.cost === 0);
+    const base = effectiveProds.filter(p => !p.cost || p.cost === 0);
     if (!search) return base;
     const s = search.toLowerCase();
     return base.filter(p =>
@@ -120,23 +213,23 @@ export default function CostosPage() {
       (p.supplierName || '').toLowerCase().includes(s) ||
       (p.sku || '').toLowerCase().includes(s),
     );
-  }, [search]);
+  }, [search, effectiveProds]);
 
   const filteredMarginBajo = useMemo(() => {
-    const base = activeProducts.filter(p => p.margin !== null && p.margin < 35 && p.price > 1 && p.cost > 0);
+    const base = effectiveProds.filter(p => p.margin !== null && p.margin < 35 && p.price > 1 && p.cost > 0);
     if (!search) return base.sort((a, b) => (a.margin ?? 0) - (b.margin ?? 0));
     const s = search.toLowerCase();
     return base.filter(p =>
       p.name.toLowerCase().includes(s) ||
       (p.supplierName || '').toLowerCase().includes(s),
     ).sort((a, b) => (a.margin ?? 0) - (b.margin ?? 0));
-  }, [search]);
+  }, [search, effectiveProds]);
 
   const filteredSuppliers = useMemo(() => {
     if (!search) return supplierStats;
     const s = search.toLowerCase();
     return supplierStats.filter(sup => sup.name.toLowerCase().includes(s));
-  }, [search]);
+  }, [search, supplierStats]);
 
   const tabs: { key: TabKey; label: string; count?: number; danger?: boolean }[] = [
     { key: 'resumen',       label: 'Radar de costos' },
@@ -155,22 +248,36 @@ export default function CostosPage() {
           <div>
             <p className="text-white/40 text-[11px] font-semibold uppercase tracking-widest mb-1">Módulo</p>
             <h1 className="text-white font-bold text-2xl">Control de Costos</h1>
-            <p className="text-white/50 text-sm mt-0.5">
-              {activeProducts.length} productos activos · {supplierStats.length} proveedores con productos
+            <p className="text-white/50 text-sm mt-0.5 flex items-center gap-2">
+              {loading
+                ? <span className="flex items-center gap-1.5"><RefreshCw className="w-3 h-3 animate-spin" /> Cargando datos…</span>
+                : <>{activeProducts.length} productos activos · {supplierStats.length} proveedores</>
+              }
             </p>
           </div>
           <div className="hidden lg:flex items-center gap-6 shrink-0">
             {[
-              { label: 'Sin costo',   val: stats.sinCosto,   color: stats.sinCosto > 0  ? 'text-[#EF4444]' : 'text-success' },
-              { label: 'Margen bajo', val: stats.marginBajo, color: stats.marginBajo > 0 ? 'text-[#F97316]' : 'text-success' },
-              { label: 'Prov. críticos', val: stats.provCriticos, color: stats.provCriticos > 0 ? 'text-[#EF4444]' : 'text-success' },
-              { label: 'Margen prom.', val: `${stats.avgMargin}%`, color: stats.avgMargin >= 45 ? 'text-success' : 'text-[#F97316]' },
+              { label: 'Sin costo',      val: stats.sinCosto,      color: stats.sinCosto > 0      ? 'text-[#EF4444]' : 'text-success' },
+              { label: 'Margen bajo',    val: stats.marginBajo,    color: stats.marginBajo > 0    ? 'text-[#F97316]' : 'text-success' },
+              { label: 'Prov. críticos', val: stats.provCriticos,  color: stats.provCriticos > 0  ? 'text-[#EF4444]' : 'text-success' },
+              { label: 'Margen prom.',   val: `${stats.avgMargin}%`, color: stats.avgMargin >= 45 ? 'text-success'   : 'text-[#F97316]' },
             ].map((k, i) => (
               <div key={i} className={i > 0 ? 'pl-6 border-l border-white/10 text-center' : 'text-center'}>
                 <div className={cn('text-2xl font-bold', k.color)}>{k.val}</div>
                 <div className="text-[10px] text-white/40 uppercase tracking-wide mt-0.5">{k.label}</div>
               </div>
             ))}
+            <div className="pl-6 border-l border-white/10">
+              <button
+                onClick={loadData}
+                disabled={loading}
+                title="Actualizar datos"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold rounded-lg transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
+                Actualizar
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -459,34 +566,82 @@ export default function CostosPage() {
                         <th className="text-left px-3 py-3 relative group/th" style={{ width: colW.sku, minWidth: 60 }}>SKU<div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('sku')} /></th>
                         <th className="text-left px-3 py-3 relative group/th" style={{ width: colW.provProd, minWidth: 80 }}>Proveedor<div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('provProd')} /></th>
                         <th className="text-right px-3 py-3 relative group/th" style={{ width: colW.listaA, minWidth: 70 }}>Lista A<div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('listaA')} /></th>
+                        <th className="text-right px-3 py-3 relative group/th" style={{ width: colW.costo, minWidth: 100 }}>Costo neto<div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('costo')} /></th>
                         <th className="text-center px-3 py-3 relative group/th" style={{ width: colW.estado, minWidth: 60 }}>Estado<div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('estado')} /></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {filteredSinCosto.map(p => (
-                        <tr key={p.id} className="hover:bg-red-50/30 transition-colors">
-                          <td className="px-5 py-3.5">
-                            <div className="text-sm font-medium text-gray-900">{p.name}</div>
-                            <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
-                          </td>
-                          <td className="px-3 py-3.5 text-xs text-gray-500 font-mono">{p.sku || '—'}</td>
-                          <td className="px-3 py-3.5">
-                            {p.supplierName
-                              ? <Link href={`/proveedores/${p.supplierName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`}
-                                  className="text-xs text-acqua hover:underline">{p.supplierName}</Link>
-                              : <span className="text-gray-400 text-xs">—</span>}
-                          </td>
-                          <td className="px-3 py-3.5 text-right text-sm text-gray-700 font-mono">
-                            {p.price > 1 ? `$${p.price.toLocaleString('es-AR')}` : <span className="text-gray-400">—</span>}
-                          </td>
-                          <td className="px-3 py-3.5 text-center">
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-danger/10 text-danger text-[10px] font-semibold">
-                              <span className="w-1.5 h-1.5 rounded-full bg-danger" />
-                              Falta costo
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredSinCosto.map(p => {
+                        const isEditing = editingId === p.id && editField === 'cost';
+                        const wasSaved  = savedId === p.id;
+                        return (
+                          <tr key={p.id} className={cn('hover:bg-red-50/30 transition-colors group', wasSaved && 'bg-success/5')}>
+                            <td className="px-5 py-3">
+                              <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
+                              <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
+                            </td>
+                            <td className="px-3 py-3 text-xs text-gray-500 font-mono">{p.sku || '—'}</td>
+                            <td className="px-3 py-3">
+                              {p.supplierName
+                                ? <Link href={`/proveedores/${p.supplierName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`}
+                                    className="text-xs text-acqua hover:underline">{p.supplierName}</Link>
+                                : <span className="text-gray-400 text-xs">—</span>}
+                            </td>
+                            <td className="px-3 py-3 text-right text-sm text-gray-700 font-mono">
+                              {p.price > 1 ? fmtARS(p.price) : <span className="text-gray-400">—</span>}
+                            </td>
+                            {/* ── Costo inline editable ── */}
+                            <td className="px-3 py-3 text-right">
+                              {isEditing ? (
+                                <div className="flex items-center justify-end gap-1">
+                                  <span className="text-xs text-gray-400">$</span>
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={editVal}
+                                    onChange={e => setEditVal(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  saveEdit(p as unknown as RealProduct);
+                                      if (e.key === 'Escape') cancelEdit();
+                                    }}
+                                    placeholder="0"
+                                    className="w-24 text-right text-sm font-mono border-b-2 border-acqua bg-acqua/5 px-1 py-0.5 focus:outline-none rounded-t"
+                                  />
+                                  <button onClick={() => saveEdit(p as unknown as RealProduct)} disabled={saving}
+                                    className="w-6 h-6 flex items-center justify-center rounded bg-success/10 text-success hover:bg-success/20 disabled:opacity-50">
+                                    {saving ? '…' : <Check className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <button onClick={cancelEdit}
+                                    className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 text-gray-400 hover:bg-gray-200">
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => startEdit(p.id, 'cost', p.cost)}
+                                  className="flex items-center justify-end gap-1.5 w-full text-right group/edit"
+                                >
+                                  {wasSaved
+                                    ? <span className="text-success text-[11px] font-semibold">✓ Guardado</span>
+                                    : <span className="flex items-center gap-1 text-[11px] text-danger font-medium group-hover/edit:text-acqua transition-colors">
+                                        <Edit2 className="w-3 h-3" /> Ingresar costo
+                                      </span>}
+                                </button>
+                              )}
+                            </td>
+                            <td className="px-3 py-3 text-center">
+                              {wasSaved
+                                ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-success/10 text-success text-[10px] font-semibold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-success" /> Guardado ✓
+                                  </span>
+                                : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-danger/10 text-danger text-[10px] font-semibold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-danger" /> Falta costo
+                                  </span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -537,6 +692,9 @@ export default function CostosPage() {
                         Margen
                         <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('margen')} />
                       </th>
+                      <th className="text-center px-3 py-3 relative group/th" style={{ width: 110, minWidth: 80 }}>
+                        Markup %
+                      </th>
                       <th className="text-center px-3 py-3 relative group/th" style={{ width: colW.diagnos, minWidth: 80 }}>
                         Diagnóstico
                         <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('diagnos')} />
@@ -547,29 +705,82 @@ export default function CostosPage() {
                     {filteredMarginBajo.slice(0, 80).map(p => {
                       const mg = p.margin ?? 0;
                       const isNeg = mg < 0;
+                      const markup = p.cost > 0 && p.price > 1 ? Math.round(((p.price / p.cost) - 1) * 1000) / 10 : null;
+                      const isEditingMarkup = editingId === p.id && editField === 'markup';
+                      const isEditingPrice  = editingId === p.id && editField === 'price';
+                      const wasSaved = savedId === p.id;
                       return (
-                        <tr key={p.id} className={cn('hover:bg-gray-50/50 transition-colors', isNeg && 'bg-danger/3')}>
-                          <td className="px-5 py-3.5">
+                        <tr key={p.id} className={cn('hover:bg-gray-50/50 transition-colors group', isNeg && 'bg-danger/3', wasSaved && 'bg-success/5')}>
+                          <td className="px-5 py-3">
                             <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
                             <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
                           </td>
-                          <td className="px-3 py-3.5 text-xs text-gray-600">{p.supplierName || '—'}</td>
-                          <td className="px-3 py-3.5 text-right text-sm font-mono text-gray-600">
-                            {p.cost > 0 ? `$${p.cost.toLocaleString('es-AR')}` : <span className="text-gray-400">—</span>}
+                          <td className="px-3 py-3 text-xs text-gray-600">{p.supplierName || '—'}</td>
+                          {/* Costo */}
+                          <td className="px-3 py-3 text-right text-sm font-mono text-gray-600">
+                            {p.cost > 0 ? fmtARS(p.cost) : <span className="text-gray-400">—</span>}
                           </td>
-                          <td className="px-3 py-3.5 text-right text-sm font-mono font-semibold text-gray-900">
-                            ${p.price.toLocaleString('es-AR')}
+                          {/* Lista A editable */}
+                          <td className="px-3 py-3 text-right">
+                            {isEditingPrice ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="text-xs text-gray-400">$</span>
+                                <input autoFocus type="text" inputMode="decimal" value={editVal}
+                                  onChange={e => setEditVal(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(p as unknown as RealProduct); if (e.key === 'Escape') cancelEdit(); }}
+                                  className="w-20 text-right text-sm font-mono border-b-2 border-acqua bg-acqua/5 px-1 py-0.5 focus:outline-none rounded-t"
+                                />
+                                <button onClick={() => saveEdit(p as unknown as RealProduct)} disabled={saving}
+                                  className="w-6 h-6 flex items-center justify-center rounded bg-success/10 text-success hover:bg-success/20 disabled:opacity-50">
+                                  {saving ? '…' : <Check className="w-3.5 h-3.5" />}
+                                </button>
+                                <button onClick={cancelEdit} className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 text-gray-400"><X className="w-3 h-3" /></button>
+                              </div>
+                            ) : (
+                              <button onClick={() => startEdit(p.id, 'price', p.price)}
+                                className="flex items-center justify-end gap-1 w-full text-right group/editp">
+                                <span className="text-sm font-mono font-semibold text-gray-900">{fmtARS(p.price)}</span>
+                                <Edit2 className="w-3 h-3 text-gray-300 group-hover/editp:text-acqua transition-colors opacity-0 group-hover:opacity-100" />
+                              </button>
+                            )}
                           </td>
-                          <td className="px-3 py-3.5 text-center">
+                          {/* Margen */}
+                          <td className="px-3 py-3 text-center">
                             <span className={cn('text-sm font-bold', isNeg ? 'text-danger' : 'text-warning')}>{mg.toFixed(1)}%</span>
                           </td>
-                          <td className="px-3 py-3.5 text-center">
-                            <span className={cn(
-                              'inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold',
-                              isNeg ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning',
-                            )}>
-                              {isNeg ? 'Pérdida' : mg < 20 ? 'Muy bajo' : 'Ajustado'}
-                            </span>
+                          {/* Markup editable */}
+                          <td className="px-3 py-3 text-center">
+                            {isEditingMarkup ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input autoFocus type="text" inputMode="decimal" value={editVal}
+                                  onChange={e => setEditVal(e.target.value)}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveEdit(p as unknown as RealProduct); if (e.key === 'Escape') cancelEdit(); }}
+                                  placeholder="%"
+                                  className="w-16 text-center text-sm font-mono border-b-2 border-acqua bg-acqua/5 px-1 py-0.5 focus:outline-none rounded-t"
+                                />
+                                <button onClick={() => saveEdit(p as unknown as RealProduct)} disabled={saving}
+                                  className="w-6 h-6 flex items-center justify-center rounded bg-success/10 text-success hover:bg-success/20 disabled:opacity-50">
+                                  {saving ? '…' : <Check className="w-3.5 h-3.5" />}
+                                </button>
+                                <button onClick={cancelEdit} className="w-6 h-6 flex items-center justify-center rounded bg-gray-100 text-gray-400"><X className="w-3 h-3" /></button>
+                              </div>
+                            ) : (
+                              <button onClick={() => startEdit(p.id, 'markup', markup ?? 0)}
+                                className="flex items-center justify-center gap-1 group/editm">
+                                {markup !== null
+                                  ? <span className="text-[12px] font-bold text-gray-700">{markup.toFixed(1)}%</span>
+                                  : <span className="text-gray-400 text-[11px]">—</span>}
+                                <Edit2 className="w-3 h-3 text-gray-300 group-hover/editm:text-acqua transition-colors opacity-0 group-hover:opacity-100" />
+                              </button>
+                            )}
+                          </td>
+                          <td className="px-3 py-3 text-center">
+                            {wasSaved
+                              ? <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-success/10 text-success">✓ Guardado</span>
+                              : <span className={cn('inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold',
+                                  isNeg ? 'bg-danger/10 text-danger' : 'bg-warning/10 text-warning')}>
+                                  {isNeg ? 'Pérdida' : mg < 20 ? 'Muy bajo' : 'Ajustado'}
+                                </span>}
                           </td>
                         </tr>
                       );

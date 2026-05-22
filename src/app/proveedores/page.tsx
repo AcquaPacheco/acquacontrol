@@ -24,7 +24,7 @@ import suppliersContactsRaw from '@/data/suppliers.json';
 import {
   Search, LayoutGrid, List, Upload, AlertCircle, CheckCircle2,
   ArrowRight, Package, ChevronDown, X,
-  Database, Phone, RefreshCw,
+  Database, Phone, RefreshCw, PauseCircle, PlayCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -122,8 +122,50 @@ export default function ProveedoresPage() {
   const [rubroFilt, setRubroFilt] = useState('Todos');
   const [view, setView] = useState<'cards' | 'list'>('list');
   const [issuesOnly, setIssuesOnly] = useState(false);
+  const [showPaused, setShowPaused] = useState(false);
   const [activeFilterBanner, setActiveFilterBanner] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'gestion' | 'inteligencia'>('gestion');
+  const [togglingSlug, setTogglingSlug] = useState<string | null>(null);
+
+  // ── Estado de proveedores pausados (lee localStorage, se actualiza localmente) ──
+  const [pausedSet, setPausedSet] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    const paused = new Set<string>();
+    enrichedContacts.forEach(c => {
+      const key = `acqua_supplier_active_${c.slug}`;
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored !== null && JSON.parse(stored) === false) paused.add(c.slug);
+      } catch { /* ignore */ }
+    });
+    return paused;
+  });
+
+  const isPaused = (slug: string) => pausedSet.has(slug);
+
+  const togglePause = async (c: EnrichedContact) => {
+    const next = !isPaused(c.slug);
+    setTogglingSlug(c.slug);
+    try {
+      const res = await fetch('/api/suppliers', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierName: c.name, active: next }),
+      });
+      const data = await res.json() as { ok: boolean };
+      if (data.ok) {
+        const key = `acqua_supplier_active_${c.slug}`;
+        localStorage.setItem(key, JSON.stringify(next));
+        setPausedSet(prev => {
+          const next2 = new Set(prev);
+          next ? next2.delete(c.slug) : next2.add(c.slug);
+          return next2;
+        });
+      }
+    } finally {
+      setTogglingSlug(null);
+    }
+  };
 
   // Odoo server URL para avatares de proveedor
   const { settings } = useSettings();
@@ -153,6 +195,10 @@ export default function ProveedoresPage() {
 
   const filtered = useMemo(() => {
     return enrichedContacts.filter(c => {
+      // Si no se pide ver pausados, ocultar los pausados de la lista normal
+      if (!showPaused && isPaused(c.slug)) return false;
+      // Si se pide ver solo pausados, mostrar solo esos
+      if (showPaused && !isPaused(c.slug)) return false;
       const q = search.toLowerCase();
       const matchSearch = !search
         || c.name.toLowerCase().includes(q)
@@ -163,7 +209,8 @@ export default function ProveedoresPage() {
       const matchIssues = !issuesOnly || c.sinCosto > 0 || c.sinPrecio > 0 || c.totalProducts === 0;
       return matchSearch && matchRubro && matchIssues;
     });
-  }, [search, rubroFilt, issuesOnly]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, rubroFilt, issuesOnly, showPaused, pausedSet]);
 
   const stats = useMemo(() => ({
     total:     enrichedContacts.length,
@@ -339,7 +386,7 @@ export default function ProveedoresPage() {
 
             {/* Filtro con problemas */}
             <button
-              onClick={() => setIssuesOnly(!issuesOnly)}
+              onClick={() => { setIssuesOnly(!issuesOnly); if (showPaused) setShowPaused(false); }}
               className={cn(
                 'flex items-center gap-2 px-4 py-2.5 text-[12px] font-semibold rounded-xl transition-colors shrink-0 border',
                 issuesOnly
@@ -349,6 +396,20 @@ export default function ProveedoresPage() {
             >
               <AlertCircle className="w-3.5 h-3.5" />
               Con problemas
+            </button>
+
+            {/* Ver pausados */}
+            <button
+              onClick={() => { setShowPaused(!showPaused); if (issuesOnly) setIssuesOnly(false); }}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2.5 text-[12px] font-semibold rounded-xl transition-colors shrink-0 border',
+                showPaused
+                  ? 'bg-gray-700 text-white border-gray-700'
+                  : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400',
+              )}
+            >
+              <PauseCircle className="w-3.5 h-3.5" />
+              Pausados
             </button>
           </div>
 
@@ -364,9 +425,9 @@ export default function ProveedoresPage() {
               {filtered.map((c) => {
                 const rubroColor = rubroColors[c.rubro] || rubroColors['default'] || 'bg-gray-100 text-gray-600';
                 const hasIssues  = c.sinCosto > 0 || c.sinPrecio > 0 || c.totalProducts === 0;
+                const paused     = isPaused(c.slug);
                 return (
-                  <Link key={c.id} href={`/proveedores/${c.slug}`}
-                    className="bg-white rounded-xl border border-gray-100 p-4 hover:shadow-md transition-all group">
+                  <div key={c.id} className={cn('bg-white rounded-xl border p-4 transition-all', paused ? 'opacity-60 border-gray-200' : 'border-gray-100 hover:shadow-md')}>
                     <div className="flex items-start gap-2 mb-3">
                       <div className="w-10 h-10 rounded-lg bg-gray-900 flex items-center justify-center text-white font-black text-base shrink-0 overflow-hidden">
                         {getSupImg(c)
@@ -374,11 +435,18 @@ export default function ProveedoresPage() {
                           ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                           : c.name.charAt(0)}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <p className="text-[12px] font-bold text-gray-900 leading-tight truncate">{c.name}</p>
-                        <span className={cn('inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5', rubroColor)}>
-                          {c.rubro}
-                        </span>
+                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                          <span className={cn('inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold', rubroColor)}>
+                            {c.rubro}
+                          </span>
+                          {paused && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-200 text-gray-500">
+                              <PauseCircle className="w-2.5 h-2.5" /> Pausado
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {c.phone && (
@@ -386,14 +454,41 @@ export default function ProveedoresPage() {
                         <Phone className="w-3 h-3" /> {c.phone}
                       </p>
                     )}
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-[11px] mb-2">
                       <span className="text-gray-600 font-semibold">{c.totalProducts} productos</span>
-                      {hasIssues
-                        ? <span className="text-danger font-semibold flex items-center gap-0.5"><AlertCircle className="w-3 h-3" /> issues</span>
-                        : <span className="text-success font-semibold flex items-center gap-0.5"><CheckCircle2 className="w-3 h-3" /> OK</span>
+                      {paused
+                        ? <span className="text-gray-400 font-semibold">Pausado</span>
+                        : hasIssues
+                          ? <span className="text-danger font-semibold flex items-center gap-0.5"><AlertCircle className="w-3 h-3" /> issues</span>
+                          : <span className="text-success font-semibold flex items-center gap-0.5"><CheckCircle2 className="w-3 h-3" /> OK</span>
                       }
                     </div>
-                  </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link href={`/proveedores/${c.slug}`}
+                        className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 bg-gray-900 text-white text-[11px] font-semibold rounded-lg hover:bg-gray-800 transition-colors"
+                      >
+                        Abrir <ArrowRight className="w-3 h-3" />
+                      </Link>
+                      <button
+                        onClick={() => togglePause(c)}
+                        disabled={togglingSlug === c.slug}
+                        title={paused ? 'Reactivar proveedor' : 'Pausar proveedor'}
+                        className={cn(
+                          'flex items-center justify-center w-8 h-8 rounded-lg border transition-colors disabled:opacity-50',
+                          paused
+                            ? 'border-green-200 bg-green-50 text-green-600 hover:bg-green-100'
+                            : 'border-gray-200 text-gray-400 hover:border-orange-300 hover:text-orange-500 hover:bg-orange-50',
+                        )}
+                      >
+                        {togglingSlug === c.slug
+                          ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          : paused
+                            ? <PlayCircle className="w-3.5 h-3.5" />
+                            : <PauseCircle className="w-3.5 h-3.5" />
+                        }
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -420,8 +515,9 @@ export default function ProveedoresPage() {
                     {filtered.map((c) => {
                       const rubroColor = rubroColors[c.rubro] || rubroColors['default'] || 'bg-gray-100 text-gray-600';
                       const hasIssues = c.sinCosto > 0 || c.sinPrecio > 0 || c.totalProducts === 0;
+                      const paused    = isPaused(c.slug);
                       return (
-                        <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
+                        <tr key={c.id} className={cn('transition-colors', paused ? 'bg-gray-50/60 opacity-70' : 'hover:bg-gray-50/50')}>
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3">
                               <div className="w-9 h-9 rounded-lg bg-gray-900 flex items-center justify-center text-white font-black text-sm shrink-0 overflow-hidden">
@@ -430,7 +526,14 @@ export default function ProveedoresPage() {
                                   ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                                   : c.name.charAt(0)}
                               </div>
-                              <div className="text-[13px] font-semibold text-gray-900 leading-tight">{c.name}</div>
+                              <div>
+                                <div className="text-[13px] font-semibold text-gray-900 leading-tight">{c.name}</div>
+                                {paused && (
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] text-gray-400 font-medium">
+                                    <PauseCircle className="w-3 h-3" /> Pausado
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="px-3 py-3.5">
@@ -449,9 +552,12 @@ export default function ProveedoresPage() {
                             </span>
                           </td>
                           <td className="px-3 py-3.5 text-center">
-                            {c.sinCosto > 0
-                              ? <span className="text-[12px] font-bold text-danger">{c.sinCosto}</span>
-                              : <CheckCircle2 className="w-3.5 h-3.5 text-success mx-auto" />}
+                            {paused
+                              ? <span className="text-gray-400 text-[11px]">—</span>
+                              : c.sinCosto > 0
+                                ? <span className="text-[12px] font-bold text-danger">{c.sinCosto}</span>
+                                : <CheckCircle2 className="w-3.5 h-3.5 text-success mx-auto" />
+                            }
                           </td>
                           <td className="px-3 py-3.5 text-center">
                             <span className={cn('text-[12px] font-semibold', c.odooListCount > 0 ? 'text-gray-700' : 'text-gray-400')}>
@@ -462,13 +568,32 @@ export default function ProveedoresPage() {
                             <span className="text-[11px] text-gray-500">{c.fiscalCondition ?? '—'}</span>
                           </td>
                           <td className="px-3 py-3.5 text-center">
-                            <Link
-                              href={`/proveedores/${c.slug}`}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-900 text-white text-[11px] font-semibold rounded-lg hover:bg-gray-800 transition-colors"
-                            >
-                              Abrir
-                              <ArrowRight className="w-3 h-3" />
-                            </Link>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <Link
+                                href={`/proveedores/${c.slug}`}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-900 text-white text-[11px] font-semibold rounded-lg hover:bg-gray-800 transition-colors"
+                              >
+                                Abrir <ArrowRight className="w-3 h-3" />
+                              </Link>
+                              <button
+                                onClick={() => togglePause(c)}
+                                disabled={togglingSlug === c.slug}
+                                title={paused ? 'Reactivar proveedor' : 'Pausar proveedor'}
+                                className={cn(
+                                  'flex items-center justify-center w-7 h-7 rounded-lg border transition-colors disabled:opacity-50',
+                                  paused
+                                    ? 'border-green-200 bg-green-50 text-green-600 hover:bg-green-100'
+                                    : 'border-gray-200 text-gray-400 hover:border-orange-300 hover:text-orange-500 hover:bg-orange-50',
+                                )}
+                              >
+                                {togglingSlug === c.slug
+                                  ? <RefreshCw className="w-3 h-3 animate-spin" />
+                                  : paused
+                                    ? <PlayCircle className="w-3 h-3" />
+                                    : <PauseCircle className="w-3 h-3" />
+                                }
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -477,7 +602,9 @@ export default function ProveedoresPage() {
                 </table>
               </div>
               {filtered.length === 0 && (
-                <p className="text-center py-8 text-sm text-gray-400">Sin resultados para ese filtro.</p>
+                <p className="text-center py-8 text-sm text-gray-400">
+                  {showPaused ? 'No hay proveedores pausados.' : 'Sin resultados para ese filtro.'}
+                </p>
               )}
             </div>
           )}

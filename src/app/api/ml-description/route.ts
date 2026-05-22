@@ -1,73 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Gemini helper — streaming via REST (sin dependencia extra)
-// ─────────────────────────────────────────────────────────────────────────────
-const GEMINI_MODEL = 'gemini-2.0-flash';
-
-interface GeminiContent { role: 'user' | 'model'; parts: Array<{ text: string }> }
-
-async function streamGemini(
-  apiKey: string,
-  systemPrompt: string,
-  userMessage: string,
-  maxTokens = 1000,
-): Promise<ReadableStream<Uint8Array>> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${apiKey}`;
-
-  const contents: GeminiContent[] = [{ role: 'user', parts: [{ text: userMessage }] }];
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: systemPrompt }] },
-      contents,
-      generationConfig: { maxOutputTokens: maxTokens, temperature: 0.7 },
-    }),
-  });
-
-  if (!response.ok || !response.body) {
-    const err = await response.text().catch(() => response.statusText);
-    throw new Error(`Gemini ${response.status}: ${err}`);
-  }
-
-  const body = response.body;
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const reader  = body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          const lines = buffer.split('\n');
-          buffer = lines.pop() ?? '';
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const json = line.slice(6).trim();
-            if (!json || json === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(json) as {
-                candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-              };
-              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) controller.enqueue(new TextEncoder().encode(text));
-            } catch { /* ignorar chunks incompletos */ }
-          }
-        }
-      } finally {
-        controller.close();
-      }
-    },
-  });
-}
+import { streamGemini } from '@/lib/gemini';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -92,6 +24,7 @@ interface RequestBody {
   mlHasInstallments?: boolean;
   competitors?: CompetitorItem[];
   recommendedPrice?: number;
+  currentDescription?: string;  // descripción actual en ML (para mejorar en lugar de generar desde cero)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,7 +46,7 @@ export async function POST(req: NextRequest) {
   const {
     productName, sku, category, mlPrice, mlTitle,
     mlCondition, mlFreeShipping, mlHasInstallments,
-    competitors = [], recommendedPrice,
+    competitors = [], recommendedPrice, currentDescription,
   } = body;
 
   const ars = (n: number) =>
@@ -191,6 +124,11 @@ ATRIBUTOS A COMPLETAR EN ML:
 TIPS ESPECÍFICOS PARA ESTA PUBLICACIÓN:
 [2-3 recomendaciones concretas basadas en la competencia y las políticas de ML]`;
 
+  const currentDescSection = currentDescription
+    ? `\nDESCRIPCIÓN ACTUAL EN ML (MEJORAR — conservá los datos concretos de Acqua Pacheco, eliminá el texto genérico de presentación "Hola somos ACQUA PACHECO…", optimizá SEO y estructura según las políticas):
+${currentDescription.slice(0, 2000)}${currentDescription.length > 2000 ? '\n[...recortado para brevedad...]' : ''}\n`
+    : '';
+
   const userMessage = `PRODUCTO A PUBLICAR:
 Nombre actual: ${productName}
 SKU: ${sku ?? '—'}
@@ -201,14 +139,20 @@ Título actual en ML: ${mlTitle ?? 'Sin título aún'}
 Condición: ${mlCondition ?? 'nuevo'}
 Envío gratis activo: ${mlFreeShipping ? 'Sí' : 'No'}
 Cuotas sin interés: ${mlHasInstallments ? 'Sí' : 'No'}
-
+${currentDescSection}
 COMPETENCIA EN ML (ya filtré mi propia tienda):
 ${competitorText}
 
-Generá la publicación siguiendo estrictamente las políticas de ML Argentina.`;
+${currentDescription
+  ? 'MEJORÁ la descripción actual: eliminá el texto de presentación genérico, conservá toda la info técnica real, optimizá SEO según políticas ML Argentina.'
+  : 'Generá la publicación siguiendo estrictamente las políticas de ML Argentina.'}`;
 
   try {
-    const stream = await streamGemini(apiKey, systemPrompt, userMessage, 1000);
+    const stream = await streamGemini(
+      apiKey, systemPrompt,
+      [{ role: 'user', parts: [{ text: userMessage }] }],
+      { maxTokens: currentDescription ? 1500 : 1000 },
+    );
 
     return new Response(stream, {
       headers: {

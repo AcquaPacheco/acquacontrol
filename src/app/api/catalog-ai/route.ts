@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 // ─────────────────────────────────────────────────────────────────────────────
 // Gemini multimodal: interpreta listas de precios en cualquier formato
 // ─────────────────────────────────────────────────────────────────────────────
-const GEMINI_MODEL = 'gemini-2.0-flash';
+import { GEMINI_MODEL } from '@/lib/gemini';
 
 export interface CatalogAIItem {
   code: string;

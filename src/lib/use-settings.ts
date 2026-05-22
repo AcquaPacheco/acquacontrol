@@ -3,9 +3,21 @@ import { useState, useEffect } from 'react';
 
 export interface AppSettings {
   odooServerUrl: string;
+  // MercadoLibre API — escaneo de competencia
+  mlAppId:     string;
+  mlAppSecret: string;
+  mlSite:      string;   // 'MLA' = Argentina (default)
+  // Gemini AI
+  geminiKey:   string;
 }
 
-const DEFAULT: AppSettings = { odooServerUrl: '' };
+const DEFAULT: AppSettings = {
+  odooServerUrl: '',
+  mlAppId:       '',
+  mlAppSecret:   '',
+  mlSite:        'MLA',
+  geminiKey:     '',
+};
 
 /**
  * Hook para leer/escribir la configuración global de la app (settings.json).

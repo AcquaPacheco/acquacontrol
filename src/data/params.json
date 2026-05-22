@@ -1,0 +1,149 @@
+{
+  "dolar": {
+    "bna": 1410,
+    "operativo": 1450,
+    "porProveedor": [
+      {
+        "nombre": "VULCANO S.A.",
+        "tasa": 1420
+      }
+    ]
+  },
+  "impuestos": {
+    "ivaCompra": 21,
+    "ivaVenta": 21,
+    "ivaReducido": 10.5,
+    "iibb": 3.5
+  },
+  "pagos": [
+    {
+      "id": "credito_1c",
+      "medio": "Crédito — 1 cuota",
+      "lista": "A",
+      "recargo": 0,
+      "activo": true
+    },
+    {
+      "id": "credito_3c",
+      "medio": "Crédito — 3 cuotas",
+      "lista": "A",
+      "recargo": 8,
+      "activo": true
+    },
+    {
+      "id": "credito_6c",
+      "medio": "Crédito — 6 cuotas",
+      "lista": "A",
+      "recargo": 15,
+      "activo": true
+    },
+    {
+      "id": "credito_12c",
+      "medio": "Crédito — 12 cuotas",
+      "lista": "A",
+      "recargo": 30,
+      "activo": true
+    },
+    {
+      "id": "debito",
+      "medio": "Débito (Nave / Mercado Pago)",
+      "lista": "B",
+      "recargo": 0,
+      "activo": true
+    },
+    {
+      "id": "transferencia",
+      "medio": "Transferencia bancaria",
+      "lista": "B",
+      "recargo": 0,
+      "activo": true
+    },
+    {
+      "id": "qr_nave",
+      "medio": "QR Nave / Dinero en cuenta",
+      "lista": "B",
+      "recargo": 0,
+      "activo": true
+    },
+    {
+      "id": "mp_link",
+      "medio": "MercadoPago Link de pago",
+      "lista": "B",
+      "recargo": 0,
+      "activo": true
+    },
+    {
+      "id": "efectivo",
+      "medio": "Efectivo",
+      "lista": "C",
+      "recargo": 0,
+      "activo": true
+    }
+  ],
+  "listas": [
+    {
+      "id": "A",
+      "nombre": "Lista A",
+      "descripcion": "Precio público — Tarjeta de crédito (base del negocio)",
+      "descuento": 0,
+      "margenMin": 45,
+      "exportaOdoo": true
+    },
+    {
+      "id": "B",
+      "nombre": "Lista B",
+      "descripcion": "Débito / Transferencia / QR — descuento sobre Lista A",
+      "descuento": 10,
+      "margenMin": 38,
+      "exportaOdoo": false
+    },
+    {
+      "id": "C",
+      "nombre": "Lista C",
+      "descripcion": "Efectivo — descuento sobre Lista A",
+      "descuento": 15,
+      "margenMin": 33,
+      "exportaOdoo": false
+    },
+    {
+      "id": "prof",
+      "nombre": "Profesional",
+      "descripcion": "5% adicional sobre Lista A, B o C según cómo pague el cliente",
+      "descuento": 5,
+      "margenMin": 28,
+      "exportaOdoo": false,
+      "descuentoBase": "A/B/C"
+    },
+    {
+      "id": "cons",
+      "nombre": "Consorcio",
+      "descripcion": "Consorcios y admin. de edificios — recargo sobre Lista A",
+      "descuento": -10,
+      "margenMin": 50,
+      "exportaOdoo": false
+    },
+    {
+      "id": "ml",
+      "nombre": "MercadoLibre",
+      "descripcion": "Precio calculado por ML Lab: Markup sobre costo + IVA 21%",
+      "descuento": 0,
+      "margenMin": 20,
+      "exportaOdoo": false,
+      "esMarkup": true
+    },
+    {
+      "id": "mayorista",
+      "nombre": "Mayorista",
+      "descripcion": "Sin regla fija — precio negociado por SKU",
+      "descuento": 25,
+      "margenMin": 22,
+      "exportaOdoo": false
+    }
+  ],
+  "redondeo": {
+    "multiplo": 10,
+    "siempreArriba": true,
+    "maxSinRedondeo": 500,
+    "decimalesCostos": 2
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "Aerosoles": {
+    "discount": 0,
+    "priceField": "unit",
+    "products": [
+      {"code": "ECOAAI01", "desc": "Abrillantador de Acero Inoxidable 260ML", "priceUnit": 3330.95, "priceBox": 39971.40},
+      {"code": "ECOSP02",  "desc": "Secuestrante de Polvo 360ML",              "priceUnit": 3866.52, "priceBox": 46398.24},
+      {"code": "ECOELM03", "desc": "Espuma Limpiadora Multiuso 295ML",         "priceUnit": 2906.42, "priceBox": 34877.04},
+      {"code": "ECOLM04",  "desc": "Lustra Muebles 295ML",                    "priceUnit": 2547.20, "priceBox": 30566.40},
+      {"code": "ECOLH05",  "desc": "Limpia Hornos 360ML",                     "priceUnit": 2841.11, "priceBox": 34093.32},
+      {"code": "ECOLTA06", "desc": "Limpia Tapizados y Alfombras 300ML",      "priceUnit": 2965.20, "priceBox": 35582.40},
+      {"code": "ECOALM07", "desc": "Aceite Lubricante Multiuso 230ML",        "priceUnit": 3076.23, "priceBox": 36914.76},
+      {"code": "ECODAS08", "desc": "Desinfectante de Ambientes 360ML",        "priceUnit": 3722.83, "priceBox": 44673.96},
+      {"code": "ECOA09",   "desc": "Apresto 360ML",                           "priceUnit": 2553.73, "priceBox": 30644.76},
+      {"code": "ECOAAFR10","desc": "Aromatizante de Ambientes Frutal 300ML",  "priceUnit": 2592.92, "priceBox": 31115.04},
+      {"code": "ECOAALI11","desc": "Aromatizante de Ambientes Limón 300ML",   "priceUnit": 2592.92, "priceBox": 31115.04},
+      {"code": "ECOAAFL12","desc": "Aromatizante de Ambientes Floral 300ML",  "priceUnit": 2592.92, "priceBox": 31115.04},
+      {"code": "ECOAALA13","desc": "Aromatizante de Ambientes Lavanda 300ML", "priceUnit": 2592.92, "priceBox": 31115.04},
+      {"code": "ECOAE14",  "desc": "Antiescarcha Express 500cc",              "priceUnit": 4745.66, "priceBox": 56947.92}
+    ]
+  },
+  "Masivo": {
+    "discount": 0,
+    "priceField": "unit",
+    "products": [
+      {"code": "CMAWNG1",  "desc": "ALL WAX Cera Liquida Negro 1L x12",          "priceUnit": 4006.11, "priceBox": 48073.29},
+      {"code": "CMAWN2",   "desc": "ALL WAX Cera Liquida Natural 1L x12",        "priceUnit": 4006.11, "priceBox": 48073.29},
+      {"code": "CMAWR3",   "desc": "ALL WAX Cera Liquida Rojo 1L x12",           "priceUnit": 4006.11, "priceBox": 48073.29},
+      {"code": "CMZNG4",   "desc": "ZIEGEL H20 Curador Siliconado Negro 1L x12", "priceUnit": 5937.22, "priceBox": 71246.65},
+      {"code": "CMZN5",    "desc": "ZIEGEL H20 Curador Siliconado Natural 1L x12","priceUnit": 5937.22, "priceBox": 71246.65},
+      {"code": "CMZR6",    "desc": "ZIEGEL H20 Curador Siliconado Rojo 1L x12",  "priceUnit": 5937.22, "priceBox": 71246.65},
+      {"code": "CMPG7",    "desc": "PARQUET GLOSSY Cera para Maderas 1L x12",    "priceUnit": 8134.74, "priceBox": 97616.87},
+      {"code": "CML8",     "desc": "LEICHT Acondicionador de Pisos 1L x12",      "priceUnit": 3533.58, "priceBox": 42402.94},
+      {"code": "CMSPP9",   "desc": "SAPP Sellador Acrilico Pisos 1L x12",        "priceUnit": 9758.39, "priceBox": 117100.70},
+      {"code": "CMC10",    "desc": "CLEM Removedor Ceras y Acrilicos 1L x12",    "priceUnit": 2774.30, "priceBox": 33291.55},
+      {"code": "CMQS11",   "desc": "QUITA SARROS Limpieza Sanitarios 1L x12",    "priceUnit": 2999.45, "priceBox": 35993.42},
+      {"code": "CMD12",    "desc": "DESTAPA CAÑERIAS Limpiador 1L x12",          "priceUnit": 2711.80, "priceBox": 32541.59},
+      {"code": "CMSH13",   "desc": "SAHNNING Crema Multiuso 500cc x12",          "priceUnit": 2219.44, "priceBox": 26633.24},
+      {"code": "ECODPLI14","desc": "Desodorante Pisos Limón 900cc x12",          "priceUnit": 1109.38, "priceBox": 13312.59},
+      {"code": "ECODPLV15","desc": "Desodorante Pisos Lavanda 900cc x12",        "priceUnit": 1109.38, "priceBox": 13312.59},
+      {"code": "ECODPC16", "desc": "Desodorante Pisos Cherry 900cc x12",         "priceUnit": 1109.38, "priceBox": 13312.59},
+      {"code": "ECODPP17", "desc": "Desodorante Pisos Pino 900cc x12",           "priceUnit": 1109.38, "priceBox": 13312.59},
+      {"code": "ECOLL18",  "desc": "Lavavajillas Limón 750ml x12",               "priceUnit": 1520.77, "priceBox": 18249.24},
+      {"code": "ECOLAV19", "desc": "Lavavajillas Aloe Vera 750ml x12",           "priceUnit": 1520.77, "priceBox": 18249.24}
+    ]
+  },
+  "Sobres": {
+    "discount": 0,
+    "priceField": "unit",
+    "products": [
+      {"code": "391792",  "desc": "LAVANDINA ECOMAX - Sobre rinde 5L x8",         "priceUnit": 1123.66, "priceBox": 89892.84},
+      {"code": "391739",  "desc": "DESENGRASANTE ECOMAX - Sobre rinde 5L x4",     "priceUnit": 2337.87, "priceBox": 93514.98},
+      {"code": "391730",  "desc": "DESODORANTE LAVANDA ECOMAX - Sobre 5L x4",     "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391731 A","desc": "DESODORANTE CHERRY ECOMAX - Sobre 5L x4",      "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391732",  "desc": "DESODORANTE PINO ECOMAX - Sobre 5L x4",        "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391733",  "desc": "DESODORANTE PAPAYA ECOMAX - Sobre 5L x4",      "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391728",  "desc": "DESODORANTE CITRICO ECOMAX - Sobre 5L x4",     "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391735",  "desc": "DESODORANTE CITRONELA ECOMAX - Sobre 5L x4",   "priceUnit": 1956.08, "priceBox": 78243.30},
+      {"code": "391736 A","desc": "DESINFECTANTE ECOMAX - Sobre 5L x4",           "priceUnit": 2390.08, "priceBox": 95603.34},
+      {"code": "391737",  "desc": "LIMPIADOR ECOLOGICO ECOMAX - Sobre 5L x4",     "priceUnit": 2125.29, "priceBox": 85011.70},
+      {"code": "391738",  "desc": "LIMPIA VIDRIOS ECOMAX - Sobre listo usar x4",  "priceUnit": 2065.59, "priceBox": 82623.50},
+      {"code": "391746",  "desc": "ECOMAX LAVAVAJILLAS CITRICO - Sobre x4",       "priceUnit": 1176.98, "priceBox": 47079.08},
+      {"code": "391747",  "desc": "ECOMAX JABON LIQUIDO ROPA - Sobre x4",         "priceUnit": 1501.25, "priceBox": 60049.85},
+      {"code": "391748",  "desc": "ECOMAX SUAVIZANTE ROPA - Sobre x4",            "priceUnit": 1061.86, "priceBox": 42474.28},
+      {"code": "391749",  "desc": "ECOMAX PRELAVADO - Sobre x4",                  "priceUnit": 1037.45, "priceBox": 41497.86},
+      {"code": "391750",  "desc": "ECOMAX LIMP. PISOS PORCELANATO - Sobre x4",    "priceUnit": 1501.25, "priceBox": 60049.85}
+    ]
+  },
+  "Bidones": {
+    "discount": 0,
+    "priceField": "unit",
+    "products": [
+      {"code": "861002", "desc": "DUFT SWEET Colonia Desodorante 4x5L",       "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861003", "desc": "DUFT SWEET Lavanda Desodorante 4x5L",       "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861004", "desc": "DUFT SWEET Marina Desodorante 4x5L",        "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861005", "desc": "DUFT SWEET Jazmin Desodorante 4x5L",        "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861006", "desc": "DUFT SWEET Cherry Desodorante 4x5L",        "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861007", "desc": "DUFT SWEET Pino Desodorante 4x5L",          "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861008", "desc": "DUFT SWEET Papaya Desodorante 4x5L",        "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "329201", "desc": "DUFT SWEET Citronela 4x5L",                 "priceUnit": 6858.58,  "priceBox": 27434.33},
+      {"code": "334345", "desc": "DUFT SWEET Citrico Desodorante 4x5L",       "priceUnit": 6551.59,  "priceBox": 26206.38},
+      {"code": "861010", "desc": "WIPER Limpiavidrios 4x5L",                  "priceUnit": 7299.79,  "priceBox": 29199.16},
+      {"code": "861600", "desc": "FM 301 Desodorante Germicida 4x5L",         "priceUnit": 27586.18, "priceBox": 110344.70},
+      {"code": "861022", "desc": "SW 112 Shampoo Desengrasante 4x5L",         "priceUnit": 10480.53, "priceBox": 41922.12},
+      {"code": "861023", "desc": "SW 111 Shampoo Tocador Celeste 4x5L",       "priceUnit": 8436.08,  "priceBox": 33744.34},
+      {"code": "260001", "desc": "Lava Manos con Terpeno de Naranja 4x5L",    "priceUnit": 4520.28,  "priceBox": 90405.57},
+      {"code": "100000", "desc": "Lava Manos Bactericida 4x5L",               "priceUnit": 21697.34, "priceBox": 86789.34},
+      {"code": "861013", "desc": "DLX 600 Desengrasante sin Solvente 4x5L",   "priceUnit": 11267.09, "priceBox": 45068.38},
+      {"code": "382018", "desc": "TOP FORCE Limpiador Desengrasante 4x5L",    "priceUnit": 10339.00, "priceBox": 41356.01},
+      {"code": "861401", "desc": "DLX 500 Limpia Grasas Minerales 4x5L",      "priceUnit": 32042.38, "priceBox": 128169.50},
+      {"code": "2045",   "desc": "DISOLVEX F Desengrasante Ind. 4x5L",        "priceUnit": 17818.25, "priceBox": 71272.98},
+      {"code": "2046",   "desc": "MC 500 Limpiador Biodegradable 4x5L",       "priceUnit": 21758.59, "priceBox": 87034.38}
+    ]
+  },
+  "Alimenticia": {
+    "discount": 0,
+    "priceField": "unit",
+    "products": [
+      {"code": "ALALC1",  "desc": "ECOMAX ALCAL Espuma Clorada Alcalina 4x5L",     "priceUnit": 27170.12, "priceBox": 108680.50},
+      {"code": "ALALC11", "desc": "ECOMAX ALCAL Espuma Clorada Alcalina x20L",     "priceUnit": 99986.06},
+      {"code": "ALFRC2",  "desc": "ECOMAX FORCE Detergente 15% 4x5L",              "priceUnit": 15675.07, "priceBox": 62700.29},
+      {"code": "ALPLUS3", "desc": "ECOMAX PLUS ULTRA Desengrasante 4x5L",          "priceUnit": 24753.55, "priceBox": 99014.20},
+      {"code": "ALPLUS31","desc": "ECOMAX PLUS ULTRA Desengrasante x20L",          "priceUnit": 91437.92},
+      {"code": "ALPWR4",  "desc": "ECOMAX POWER PLUS Det. Pasta 30% 4x5L",         "priceUnit": 21487.91, "priceBox": 85951.64},
+      {"code": "ALDESG5", "desc": "ECOMAX DESGRASS Desengrasante Multiuso 4x5L",   "priceUnit": 20214.31, "priceBox": 80857.25},
+      {"code": "ALDESG51","desc": "ECOMAX DESGRASS Desengrasante Multiuso x20L",   "priceUnit": 74391.28},
+      {"code": "ALACD6",  "desc": "ECOMAX ACID Desincrustante Acido 4x5L",         "priceUnit": 36575.17, "priceBox": 146300.67},
+      {"code": "ALACD61", "desc": "ECOMAX ACID Desincrustante Acido x20L",         "priceUnit": 135328.12}
+    ]
+  }
+}

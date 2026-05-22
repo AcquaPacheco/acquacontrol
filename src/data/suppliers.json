@@ -497,7 +497,8 @@
     "phone": "+54 9 11 3865-1519",
     "tags": [],
     "fiscalCondition": null,
-    "odooId": 1650
+    "odooId": 1650,
+    "active": false
   },
   {
     "id": "__export__.res_partner_878_91ccf566",
