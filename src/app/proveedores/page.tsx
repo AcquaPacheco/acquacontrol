@@ -29,6 +29,7 @@ import {
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
+import { loadAllOverrides } from '@/lib/use-local-storage';
 
 // ── Tipos
 interface RealProd { id: string; cost: number; price: number; image: string | null; supplierName: string | null; odooId: number | null; }
@@ -167,12 +168,28 @@ export default function ProveedoresPage() {
     }
   };
 
-  // Odoo server URL para avatares de proveedor
+  // Odoo server URL + logos guardados localmente
   const { settings } = useSettings();
   const odooUrl = settings.odooServerUrl;
 
-  const getSupImg = (c: { odooId?: number | null }) =>
-    buildOdooImageUrl(c.odooId, 'res.partner', odooUrl);
+  // Logos subidos manualmente (localStorage) — se cargan una vez al montar
+  const [logoOverrides, setLogoOverrides] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      const all = loadAllOverrides();
+      const logos: Record<string, string> = {};
+      for (const [id, ov] of Object.entries(all)) {
+        if (typeof ov.logo === 'string') logos[id] = ov.logo;
+      }
+      setLogoOverrides(logos);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Prioridad: logo local → Odoo URL
+  const getSupImg = (c: { id: string; odooId?: number | null }): string | null => {
+    if (logoOverrides[c.id]) return logoOverrides[c.id];
+    return buildOdooImageUrl(c.odooId, 'res.partner', odooUrl);
+  };
 
   // Leer URL params al montar
   useEffect(() => {
@@ -429,10 +446,10 @@ export default function ProveedoresPage() {
                 return (
                   <div key={c.id} className={cn('bg-white rounded-xl border p-4 transition-all', paused ? 'opacity-60 border-gray-200' : 'border-gray-100 hover:shadow-md')}>
                     <div className="flex items-start gap-2 mb-3">
-                      <div className="w-10 h-10 rounded-lg bg-gray-900 flex items-center justify-center text-white font-black text-base shrink-0 overflow-hidden">
+                      <div className="w-10 h-10 rounded-lg bg-white border border-gray-100 shadow-sm flex items-center justify-center text-gray-700 font-black text-base shrink-0 overflow-hidden">
                         {getSupImg(c)
                           // eslint-disable-next-line @next/next/no-img-element
-                          ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                          ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-contain p-0.5" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                           : c.name.charAt(0)}
                       </div>
                       <div className="min-w-0 flex-1">
@@ -520,10 +537,10 @@ export default function ProveedoresPage() {
                         <tr key={c.id} className={cn('transition-colors', paused ? 'bg-gray-50/60 opacity-70' : 'hover:bg-gray-50/50')}>
                           <td className="px-5 py-3.5">
                             <div className="flex items-center gap-3">
-                              <div className="w-9 h-9 rounded-lg bg-gray-900 flex items-center justify-center text-white font-black text-sm shrink-0 overflow-hidden">
+                              <div className="w-9 h-9 rounded-lg bg-white border border-gray-100 shadow-sm flex items-center justify-center text-gray-700 font-black text-sm shrink-0 overflow-hidden">
                                 {getSupImg(c)
                                   // eslint-disable-next-line @next/next/no-img-element
-                                  ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                  ? <img src={getSupImg(c)!} alt={c.name} className="w-full h-full object-contain p-0.5" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                                   : c.name.charAt(0)}
                               </div>
                               <div>

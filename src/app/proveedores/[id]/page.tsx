@@ -2590,8 +2590,8 @@ export default function SupplierDetailPage() {
               {/* Avatar + photo upload */}
               <div className="relative px-4">
                 <div
-                  className="absolute -top-5 left-4 w-10 h-10 rounded-xl bg-white border-2 border-white shadow-md flex items-center justify-center overflow-hidden group cursor-pointer"
-                  title="Subir logo del proveedor"
+                  className="absolute -top-5 left-4 w-12 h-12 rounded-xl bg-white border-2 border-gray-100 shadow-md flex items-center justify-center overflow-hidden group cursor-pointer"
+                  title="Click para subir logo del proveedor"
                   onClick={() => {
                     const inp = document.createElement('input');
                     inp.type = 'file'; inp.accept = 'image/*';
@@ -2611,7 +2611,7 @@ export default function SupplierDetailPage() {
                 >
                   {(overrides.logo || supplier.logo)
                     // eslint-disable-next-line @next/next/no-img-element
-                    ? <img src={(overrides.logo || supplier.logo) as string} alt={supplier.name} className="w-full h-full object-cover" />
+                    ? <img src={(overrides.logo || supplier.logo) as string} alt={supplier.name} className="w-full h-full object-contain p-1" />
                     : <span className="text-lg font-black text-gray-700">{supplier.name.charAt(0)}</span>
                   }
                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
