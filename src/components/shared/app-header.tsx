@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import Image from 'next/image';
 import {
   LayoutDashboard, Users, Package, TrendingUp,
-  Tag, FileSpreadsheet, ShoppingCart, MessageSquare, History,
+  Tag, FileSpreadsheet, MessageSquare, History,
   Settings, Bell, ChevronDown, Menu, X, FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -23,8 +23,8 @@ const primaryNavItems = [
 ];
 
 const moreItems = [
-  { label: 'Consultor',    href: '/consultor',     icon: MessageSquare   },
-  { label: 'Lista Precios',href: '/lista-precios', icon: FileText        },
+  { label: 'Consultor',     href: '/consultor',     icon: MessageSquare },
+  { label: 'Lista Precios', href: '/lista-precios', icon: FileText      },
 ];
 
 const bottomNavItems = [
@@ -51,32 +51,31 @@ export function AppHeader() {
     <>
       {/* ─── TOP BAR ─── */}
       <header className="sticky top-0 z-50 bg-header border-b border-white/8">
-        {/* Línea decorativa superior sutil */}
-        <div className="h-[2px] bg-gradient-to-r from-transparent via-acqua/40 to-transparent" />
+        <div className="h-[2px] bg-gradient-to-r from-transparent via-acqua/50 to-transparent" />
 
-        <div className="flex items-center h-12 px-4 gap-3">
+        <div className="flex items-center h-14 px-4 gap-4">
 
-          {/* ── LOGO (izquierda) ── */}
-          <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
+          {/* ── LOGO ── */}
+          <Link href="/" className="flex items-center gap-3 shrink-0">
             <Image
               src="/brand/acqua-logo-white.png"
               alt="ACQUA"
-              width={86}
-              height={28}
-              style={{ width: 86, height: 'auto' }}
+              width={96}
+              height={32}
+              style={{ width: 96, height: 'auto' }}
               priority
             />
-            <div className="hidden sm:flex flex-col leading-none border-l border-white/15 pl-2.5">
-              <span className="text-white/25 text-[8px] font-bold uppercase tracking-[0.18em]">CONTROL</span>
-              <span className="text-white/50 text-[8px] font-bold uppercase tracking-[0.18em]">OS</span>
+            <div className="hidden sm:flex flex-col leading-none border-l border-white/15 pl-3">
+              <span className="text-white/30 text-[9px] font-bold uppercase tracking-[0.2em]">CONTROL</span>
+              <span className="text-white/55 text-[9px] font-bold uppercase tracking-[0.2em]">OS</span>
             </div>
           </Link>
 
-          {/* ── NAV CENTRAL (desktop) ── */}
-          <nav className="hidden lg:flex items-center justify-center flex-1 min-w-0">
+          {/* ── NAV CENTRAL ── */}
+          <nav className="hidden lg:flex items-center justify-center flex-1 min-w-0 gap-2">
 
-            {/* Grupo principal */}
-            <div className="flex items-center gap-0.5 bg-white/5 rounded-xl px-1.5 py-1">
+            {/* Módulos */}
+            <div className="flex items-center gap-0.5 bg-white/[0.06] rounded-xl px-2 py-1.5">
               {primaryNavItems.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
@@ -85,13 +84,13 @@ export function AppHeader() {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 whitespace-nowrap',
+                      'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150 whitespace-nowrap',
                       active
-                        ? 'bg-acqua text-white shadow-sm shadow-acqua/30'
-                        : 'text-white/55 hover:text-white hover:bg-white/8'
+                        ? 'bg-acqua text-white shadow-sm shadow-acqua/40'
+                        : 'text-white/60 hover:text-white hover:bg-white/10'
                     )}
                   >
-                    <Icon className="w-3 h-3 shrink-0" />
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
                     <span className="hidden xl:inline">{item.label}</span>
                   </Link>
                 );
@@ -103,17 +102,17 @@ export function AppHeader() {
                   onClick={() => setMoreOpen(!moreOpen)}
                   onBlur={() => setTimeout(() => setMoreOpen(false), 150)}
                   className={cn(
-                    'flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150',
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all duration-150',
                     moreIsActive
                       ? 'bg-acqua text-white'
-                      : 'text-white/40 hover:text-white/70 hover:bg-white/8'
+                      : 'text-white/45 hover:text-white hover:bg-white/10'
                   )}
                 >
                   <span>Más</span>
-                  <ChevronDown className={cn('w-3 h-3 transition-transform duration-200', moreOpen && 'rotate-180')} />
+                  <ChevronDown className={cn('w-3.5 h-3.5 transition-transform duration-200', moreOpen && 'rotate-180')} />
                 </button>
                 {moreOpen && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-[#111c2b] border border-white/10 rounded-xl py-1.5 min-w-[160px] shadow-2xl shadow-black/50 z-50">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 bg-[#111c2b] border border-white/10 rounded-xl py-1.5 min-w-[170px] shadow-2xl shadow-black/60 z-50">
                     <div className="w-2 h-2 bg-[#111c2b] border-l border-t border-white/10 rotate-45 absolute -top-1 left-1/2 -translate-x-1/2" />
                     {moreItems.map((item) => {
                       const Icon = item.icon;
@@ -123,11 +122,11 @@ export function AppHeader() {
                           key={item.href}
                           href={item.href}
                           className={cn(
-                            'flex items-center gap-2.5 px-4 py-2 text-[12px] font-medium transition-colors',
-                            active ? 'text-acqua bg-acqua/10' : 'text-white/65 hover:text-white hover:bg-white/5'
+                            'flex items-center gap-2.5 px-4 py-2.5 text-[13px] font-medium transition-colors',
+                            active ? 'text-acqua bg-acqua/10' : 'text-white/70 hover:text-white hover:bg-white/5'
                           )}
                         >
-                          <Icon className="w-3.5 h-3.5" />
+                          <Icon className="w-4 h-4" />
                           {item.label}
                         </Link>
                       );
@@ -138,80 +137,78 @@ export function AppHeader() {
             </div>
 
             {/* Separador */}
-            <div className="w-px h-6 bg-white/10 mx-3 shrink-0" />
+            <div className="w-px h-7 bg-white/10 mx-1 shrink-0" />
 
-            {/* Grupo integraciones */}
-            <div className="flex items-center gap-1.5">
+            {/* Integraciones */}
+            <div className="flex items-center gap-2">
 
               {/* Odoo */}
               <Link
                 href="/export-odoo"
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-150 whitespace-nowrap border',
+                  'flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12px] font-bold transition-all duration-150 whitespace-nowrap border',
                   isActive('/export-odoo')
                     ? 'bg-odoo border-odoo/60 text-white shadow-sm shadow-odoo/30'
-                    : 'bg-odoo/15 border-odoo/20 text-odoo-light hover:bg-odoo/25 hover:border-odoo/40'
+                    : 'bg-odoo/15 border-odoo/25 text-odoo-light hover:bg-odoo/30 hover:border-odoo/50'
                 )}
               >
-                <FileSpreadsheet className="w-3 h-3" />
-                <span className="italic font-bold">odoo</span>
+                <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+                <span className="italic">odoo</span>
               </Link>
 
-              {/* MercadoLibre */}
+              {/* MercadoLibre — siempre visible y amarillo */}
               <Link
                 href="/mercadolibre"
                 className={cn(
-                  'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all duration-150 whitespace-nowrap border',
+                  'flex items-center gap-2 px-3.5 py-2 rounded-xl text-[12px] font-bold transition-all duration-150 whitespace-nowrap border',
                   isActive('/mercadolibre')
-                    ? 'bg-meli border-meli/60 shadow-sm shadow-meli/30'
-                    : 'bg-meli/10 border-meli/20 hover:bg-meli/20 hover:border-meli/40'
+                    ? 'bg-meli border-meli text-meli-dark shadow-sm shadow-meli/40'
+                    : 'bg-meli/20 border-meli/40 text-meli hover:bg-meli hover:border-meli hover:text-meli-dark'
                 )}
               >
                 <Image
                   src="/ml-logo.png"
-                  alt="MercadoLibre"
-                  width={14}
-                  height={14}
-                  style={{ width: 14, height: 14, objectFit: 'contain' }}
+                  alt="ML"
+                  width={16}
+                  height={16}
+                  style={{ width: 16, height: 16, objectFit: 'contain' }}
                 />
-                <span className="text-meli-dark hidden xl:inline">ML</span>
+                <span>Mercado Libre</span>
               </Link>
             </div>
           </nav>
 
           {/* ── ACCIONES DERECHA ── */}
-          <div className="flex items-center gap-1 ml-auto lg:ml-0 shrink-0">
+          <div className="flex items-center gap-1.5 ml-auto lg:ml-0 shrink-0">
 
-            {/* Deploy button */}
             <DeployButton />
 
-            {/* Separador */}
-            <div className="w-px h-5 bg-white/10 mx-0.5 hidden lg:block" />
+            <div className="w-px h-6 bg-white/10 mx-1 hidden lg:block" />
 
-            {/* Notificaciones */}
-            <button className="relative flex items-center justify-center w-8 h-8 rounded-lg text-white/50 hover:text-white hover:bg-white/8 transition-colors">
-              <Bell className="w-3.5 h-3.5" />
-              <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-danger text-white text-[8px] font-bold rounded-full flex items-center justify-center leading-none">3</span>
+            {/* Bell */}
+            <button className="relative flex items-center justify-center w-9 h-9 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition-colors">
+              <Bell className="w-4 h-4" />
+              <span className="absolute top-1 right-1 w-4 h-4 bg-danger text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none">3</span>
             </button>
 
             {/* Usuario */}
-            <button className="hidden sm:flex items-center gap-1.5 pl-1.5 pr-2 py-1 rounded-lg hover:bg-white/8 transition-colors group">
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-acqua/50 to-acqua/20 border border-acqua/40 flex items-center justify-center">
-                <span className="text-white text-[10px] font-bold">EP</span>
+            <button className="hidden sm:flex items-center gap-2 pl-2 pr-2.5 py-1.5 rounded-xl hover:bg-white/10 transition-colors">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-acqua/60 to-acqua/20 border border-acqua/50 flex items-center justify-center shrink-0">
+                <span className="text-white text-[11px] font-bold">EP</span>
               </div>
               <div className="hidden xl:flex flex-col items-start leading-none">
-                <span className="text-white/80 text-[11px] font-semibold">Enrico</span>
-                <span className="text-white/35 text-[9px]">Pacheco</span>
+                <span className="text-white/85 text-[12px] font-semibold">Enrico</span>
+                <span className="text-white/35 text-[10px]">Pacheco</span>
               </div>
-              <ChevronDown className="w-3 h-3 text-white/30 hidden xl:block group-hover:text-white/50 transition-colors" />
+              <ChevronDown className="w-3.5 h-3.5 text-white/30 hidden xl:block" />
             </button>
 
             {/* Hamburguesa mobile */}
             <button
-              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg text-white/60 hover:text-white hover:bg-white/8 transition-colors"
+              className="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             >
-              {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
@@ -285,7 +282,7 @@ export function AppHeader() {
                       active ? 'bg-acqua text-white' : 'bg-white/5 text-white/65 hover:bg-white/10'
                     )}
                   >
-                    <Icon className="w-4.5 h-4.5" />
+                    <Icon className="w-5 h-5" />
                     <span className="text-center leading-tight">{item.label}</span>
                   </Link>
                 );
@@ -305,10 +302,10 @@ export function AppHeader() {
               <Link
                 href="/mercadolibre"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[12px] font-bold bg-meli/15 border border-meli/25 text-meli-dark"
+                className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[13px] font-bold bg-meli/20 border border-meli/40 text-meli"
               >
-                <Image src="/ml-logo.png" alt="ML" width={16} height={16} style={{ width: 16, height: 16 }} />
-                MercadoLibre
+                <Image src="/ml-logo.png" alt="ML" width={18} height={18} style={{ width: 18, height: 18 }} />
+                Mercado Libre
               </Link>
             </div>
           </div>

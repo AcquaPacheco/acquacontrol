@@ -2657,8 +2657,8 @@ export default function ProductosPage() {
           {/* ─────── COLUMNA DERECHA: INSPECTOR (desktop) ─────── */}
           {inspectorOpen && (
             <div className="hidden lg:block">
-              {/* top-[54px] = header (50px) + 4px gap. max-h para que sea scrolleable dentro del viewport */}
-              <div className="sticky top-[54px] max-h-[calc(100vh-62px)] overflow-y-auto rounded-2xl">
+              {/* top-[62px] = header (58px) + 4px gap. max-h para que sea scrolleable dentro del viewport */}
+              <div className="sticky top-[62px] max-h-[calc(100vh-70px)] overflow-y-auto rounded-2xl">
                 {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />}
               </div>
             </div>
