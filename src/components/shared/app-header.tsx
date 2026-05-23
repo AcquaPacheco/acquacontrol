@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useState } from 'react';
+import { DeployButton } from '@/components/shared/deploy-button';
 
 const primaryNavItems = [
   { label: 'Control',       href: '/',            icon: LayoutDashboard },
@@ -130,6 +131,8 @@ export function AppHeader() {
               </div>
 
               <div className="w-px h-5 bg-white/10 mx-1.5 shrink-0" />
+
+              <DeployButton />
 
               {specialNavItems.map((item) => {
                 const Icon = item.icon;
