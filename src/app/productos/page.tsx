@@ -108,11 +108,10 @@ function formatARS(n: number) {
 }
 
 function marginBadge(m: number | null) {
-  if (m === null) return { bg: 'bg-gray-200 text-gray-500',       text: '—'      };
-  if (m >= 55)    return { bg: 'bg-[#16A34A] text-white',         text: `${m}%`  };
-  if (m >= 45)    return { bg: 'bg-[#4ADE80] text-[#14532D]',    text: `${m}%`  };
-  if (m >= 35)    return { bg: 'bg-[#F97316] text-white',         text: `${m}%`  };
-  return             { bg: 'bg-[#EF4444] text-white',             text: `${m}%`  };
+  if (m === null) return { bg: 'bg-gray-200 text-gray-500',  text: '—'      };
+  if (m >= 35)    return { bg: 'bg-[#16A34A] text-white',    text: `${m}%`  };
+  if (m >= 20)    return { bg: 'bg-[#F97316] text-white',    text: `${m}%`  };
+  return             { bg: 'bg-[#EF4444] text-white',        text: `${m}%`  };
 }
 
 function statusBadge(status: string) {
@@ -2498,9 +2497,8 @@ export default function ProductosPage() {
                     const accentCls =
                       !p.cost || p.cost === 0 ? 'bg-gray-200' :
                       p.margin === null        ? 'bg-gray-200' :
-                      p.margin >= 55           ? 'bg-[#16A34A]' :
-                      p.margin >= 45           ? 'bg-[#4ADE80]' :
-                      p.margin >= 35           ? 'bg-[#F97316]' :
+                      p.margin >= 35           ? 'bg-[#16A34A]' :
+                      p.margin >= 20           ? 'bg-[#F97316]' :
                                                   'bg-[#EF4444]';
 
                     // Category short label
@@ -2669,7 +2667,8 @@ export default function ProductosPage() {
           {/* ─────── COLUMNA DERECHA: INSPECTOR (desktop) ─────── */}
           {inspectorOpen && (
             <div className="hidden lg:block">
-              <div className="sticky top-4">
+              {/* top-[54px] = header (50px) + 4px gap. max-h para que sea scrolleable dentro del viewport */}
+              <div className="sticky top-[54px] max-h-[calc(100vh-62px)] overflow-y-auto rounded-2xl">
                 {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />}
               </div>
             </div>
