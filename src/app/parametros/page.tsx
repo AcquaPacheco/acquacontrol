@@ -1777,20 +1777,47 @@ function SeccionDatos() {
 
 function SeccionOdoo() {
   const { settings, loading, save } = useSettings();
-  const [url,     setUrl]     = useState('');
-  const [saved,   setSaved]   = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testOk,  setTestOk]  = useState<boolean | null>(null);
+  const [url,       setUrl]       = useState('');
+  const [username,  setUsername]  = useState('');
+  const [apiKey,    setApiKey]    = useState('');
+  const [showKey,   setShowKey]   = useState(false);
+  const [saved,     setSaved]     = useState(false);
+  const [testing,   setTesting]   = useState(false);
+  const [testOk,    setTestOk]    = useState<boolean | null>(null);
+  const [syncing,   setSyncing]   = useState(false);
+  const [syncResult, setSyncResult] = useState<{ ok: boolean; message?: string; error?: string; withStock?: number; matched?: number; unmatched?: number } | null>(null);
 
-  // Cargar URL inicial cuando settings estén listos
   useEffect(() => {
-    if (!loading) setUrl(settings.odooServerUrl);
-  }, [loading, settings.odooServerUrl]);
+    if (!loading) {
+      setUrl(settings.odooServerUrl ?? '');
+      setUsername(settings.odooUsername ?? '');
+      setApiKey(settings.odooApiKey ?? '');
+    }
+  }, [loading, settings]);
 
   const handleSave = async () => {
-    await save({ odooServerUrl: url.replace(/\/$/, '') });
+    await save({
+      odooServerUrl: url.replace(/\/$/, ''),
+      odooUsername:  username.trim(),
+      odooApiKey:    apiKey.trim(),
+    });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleSyncStock = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/sync-stock-odoo', { method: 'POST' });
+      const data = await res.json() as { ok: boolean; message?: string; error?: string; withStock?: number; matched?: number; unmatched?: number };
+      setSyncResult(data);
+      if (data.ok) setTimeout(() => setSyncResult(null), 8000);
+    } catch (e) {
+      setSyncResult({ ok: false, error: String(e) });
+    } finally {
+      setSyncing(false);
+    }
   };
 
   const handleTest = () => {
@@ -1893,10 +1920,108 @@ function SeccionOdoo() {
           </div>
         )}
 
+        {/* ── Credenciales API ── */}
+        <div className="pt-4 border-t border-gray-100 space-y-4">
+          <div className="flex items-start gap-2">
+            <RefreshCw className="w-4 h-4 text-teal-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-[12px] font-semibold text-gray-800">Sync de stock directo desde Odoo</p>
+              <p className="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+                Con usuario y API Key podés sincronizar el stock sin exportar Excel.
+                Generá la API Key en <strong>Odoo → Ajustes → Técnico → Claves API</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {/* Usuario */}
+            <div>
+              <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                Usuario (email de Odoo)
+              </label>
+              <input
+                type="email"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="tu@email.com"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0784F2]/30 focus:border-[#0784F2]"
+              />
+            </div>
+
+            {/* API Key */}
+            <div>
+              <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                API Key
+              </label>
+              <div className="relative">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder="Pegá la clave generada en Odoo"
+                  className="w-full pl-3 pr-10 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0784F2]/30 focus:border-[#0784F2] font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Botón Sync Stock */}
+          {username && apiKey && (
+            <div className="bg-teal-50 border border-teal-200 rounded-xl p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[12px] font-bold text-teal-800">Sincronizar stock ahora</p>
+                  <p className="text-[11px] text-teal-600 mt-0.5">
+                    Conecta con Odoo, lee el stock real y actualiza todos los productos.
+                  </p>
+                </div>
+                <button
+                  onClick={handleSyncStock}
+                  disabled={syncing}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold whitespace-nowrap transition-all',
+                    syncing
+                      ? 'bg-teal-200 text-teal-600 cursor-wait'
+                      : 'bg-teal-600 text-white hover:bg-teal-700'
+                  )}
+                >
+                  <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
+                  {syncing ? 'Sincronizando...' : 'Sync Stock'}
+                </button>
+              </div>
+
+              {syncResult && (
+                <div className={cn(
+                  'mt-3 p-3 rounded-lg text-[12px]',
+                  syncResult.ok ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-700'
+                )}>
+                  {syncResult.ok ? (
+                    <>
+                      <p className="font-bold">✅ {syncResult.message}</p>
+                      {syncResult.unmatched !== undefined && syncResult.unmatched > 0 && (
+                        <p className="mt-1 text-green-600">{syncResult.unmatched} productos de Odoo no encontrados en el sistema (sin coincidencia de SKU).</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="font-medium">❌ {syncResult.error}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Save */}
         <div className="flex items-center justify-between pt-3 border-t border-gray-100">
           <p className="text-[11px] text-gray-400">
-            Los cambios aplican inmediatamente en todas las páginas de productos y proveedores.
+            Los cambios aplican inmediatamente en todas las páginas.
           </p>
           <button
             onClick={handleSave}
@@ -1908,7 +2033,7 @@ function SeccionOdoo() {
                 : 'bg-[#07111F] text-white hover:bg-gray-800',
             )}
           >
-            {saved ? <><Check className="w-3.5 h-3.5" /> Guardado</> : <><Save className="w-3.5 h-3.5" /> Guardar URL</>}
+            {saved ? <><Check className="w-3.5 h-3.5" /> Guardado</> : <><Save className="w-3.5 h-3.5" /> Guardar</>}
           </button>
         </div>
       </div>

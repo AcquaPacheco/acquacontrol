@@ -6,6 +6,8 @@ const SETTINGS_PATH = resolve(process.cwd(), 'src/data/settings.json');
 
 interface Settings {
   odooServerUrl: string;
+  odooUsername:  string;
+  odooApiKey:    string;
   mlAppId:       string;
   mlAppSecret:   string;
   mlSite:        string;
@@ -14,6 +16,8 @@ interface Settings {
 
 const DEFAULT_SETTINGS: Settings = {
   odooServerUrl: '',
+  odooUsername:  '',
+  odooApiKey:    '',
   mlAppId:       '',
   mlAppSecret:   '',
   mlSite:        'MLA',

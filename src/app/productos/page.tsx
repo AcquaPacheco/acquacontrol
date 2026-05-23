@@ -1713,39 +1713,34 @@ export default function ProductosPage() {
   };
 
   // ── Sincronizar stock desde archivo "Variante del producto" ──
-  const handleSyncStock = async (file: File) => {
+  const handleSyncStock = async () => {
     setSyncingStock(true);
     setSyncToast(null);
+    setSyncResult(null);
     try {
-      const ab = await file.arrayBuffer();
-      const wb = XLSX.read(ab, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '' });
-      const rows = (rawRows.slice(1) as string[][]).map(r => ({
-        id: String(r[0] ?? ''),
-        name: String(r[1] ?? ''),
-        qty: Number(r[2] ?? 0),
-        barcode: String(r[3] ?? ''),
-        displayName: String(r[4] ?? ''),
-      }));
-      const res = await fetch('/api/products/sync-stock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows }),
-      });
-      const data = await res.json() as { ok: boolean; matched: number; unmatched: number; unmatchedNames: string[] };
+      const res = await fetch('/api/sync-stock-odoo', { method: 'POST' });
+      const data = await res.json() as {
+        ok: boolean;
+        message?: string;
+        error?: string;
+        withStock?: number;
+        matched?: number;
+        unmatched?: number;
+        unmatchedSample?: string[];
+      };
       if (data.ok) {
-        setSyncResult({ matched: data.matched, unmatched: data.unmatched, unmatchedNames: data.unmatchedNames ?? [] });
-        if (data.unmatched === 0) {
-          setSyncToast(`✓ ${data.matched} productos sincronizados. Recargando…`);
-          setTimeout(() => window.location.reload(), 1800);
-        }
-        // If there are unmatched, show the panel and don't auto-reload so user can review
+        setSyncResult({
+          matched:       data.matched   ?? 0,
+          unmatched:     data.unmatched ?? 0,
+          unmatchedNames: data.unmatchedSample ?? [],
+        });
+        setSyncToast(`✓ ${data.message ?? `${data.withStock} productos con stock actualizado`} — Recargando…`);
+        setTimeout(() => window.location.reload(), 2000);
       } else {
-        setSyncToast('Error al sincronizar stock.');
+        setSyncToast(`❌ ${data.error ?? 'Error al sincronizar stock'}`);
       }
     } catch (e) {
-      setSyncToast(`Error: ${String(e)}`);
+      setSyncToast(`❌ Error: ${String(e)}`);
     } finally {
       setSyncingStock(false);
     }
@@ -2132,20 +2127,15 @@ export default function ProductosPage() {
 
               {/* Sincronizar stock + Mostrar ocultos */}
               <div className="flex items-center gap-1.5 shrink-0">
-                <input
-                  ref={stockInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleSyncStock(f); e.target.value = ''; }}
-                />
                 <button
-                  onClick={() => stockInputRef.current?.click()}
+                  onClick={handleSyncStock}
                   disabled={syncingStock}
-                  title="Sincronizar stock desde Variante del producto (Odoo)"
+                  title="Sincronizar stock directo desde Odoo (requiere credenciales en Parámetros)"
                   className={cn(
-                    'flex items-center gap-1.5 px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-[11px] font-semibold transition-colors',
-                    syncingStock ? 'opacity-60 cursor-not-allowed' : 'hover:border-[#0784F2]/50 hover:text-[#0784F2]',
+                    'flex items-center gap-1.5 px-3 py-2.5 bg-white border rounded-xl text-[11px] font-semibold transition-colors',
+                    syncingStock
+                      ? 'opacity-60 cursor-not-allowed border-gray-200'
+                      : 'border-teal-200 text-teal-700 hover:bg-teal-50 hover:border-teal-400',
                   )}
                 >
                   {syncingStock

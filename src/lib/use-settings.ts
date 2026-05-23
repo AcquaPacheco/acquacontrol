@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 
 export interface AppSettings {
   odooServerUrl: string;
+  odooUsername:  string;
+  odooApiKey:    string;
   // MercadoLibre API — escaneo de competencia
   mlAppId:     string;
   mlAppSecret: string;
@@ -13,6 +15,8 @@ export interface AppSettings {
 
 const DEFAULT: AppSettings = {
   odooServerUrl: '',
+  odooUsername:  '',
+  odooApiKey:    '',
   mlAppId:       '',
   mlAppSecret:   '',
   mlSite:        'MLA',
