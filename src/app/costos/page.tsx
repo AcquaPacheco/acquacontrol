@@ -8,13 +8,16 @@ import {
   DollarSign, AlertTriangle, CheckCircle2, ArrowRight,
   Search, X, Users, BarChart3, Package, Lightbulb,
   TrendingDown, RefreshCw, ChevronRight, Edit2, Check,
+  Image as ImageIcon,
 } from 'lucide-react';
+import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 
 // ── Tipos
 interface RealProduct {
   id: string; sku: string | null; name: string;
   cost: number; price: number; margin: number | null;
-  image: string | null; supplierName: string | null;
+  image: string | null; odooId?: number | null;
+  supplierName: string | null;
   category: string | null; active: boolean; hidden?: boolean;
 }
 
@@ -63,6 +66,11 @@ export default function CostosPage() {
   const [tab, setTab]     = useState<TabKey>('resumen');
   const [search, setSearch] = useState('');
   const [activeFilterBanner, setActiveFilterBanner] = useState<string | null>(null);
+
+  const { settings } = useSettings();
+  const odooUrl = settings?.odooServerUrl ?? '';
+  const getImg = (p: RealProduct) =>
+    p.image || buildOdooImageUrl(p.odooId ?? null, 'product.template', odooUrl);
 
   // ── Datos dinámicos (fetched on mount, refresh on demand) ─────────────────
   const [rawProducts,  setRawProducts]  = useState<RealProduct[]>([]);
@@ -433,7 +441,12 @@ export default function CostosPage() {
                       .sort((a, b) => b.price - a.price)
                       .slice(0, 6)
                       .map(p => (
-                        <div key={p.id} className="flex items-center gap-3 px-5 py-3">
+                        <div key={p.id} className="flex items-center gap-2.5 px-5 py-3">
+                          {(() => { const img = getImg(p); return (
+                            <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                              {img ? <img src={img} alt={p.name} className="w-full h-full object-contain p-0.5" /> : <ImageIcon className="w-3 h-3 text-gray-300" />}
+                            </div>
+                          ); })()}
                           <div className="flex-1 min-w-0">
                             <p className="text-[12px] font-medium text-gray-900 line-clamp-1">{p.name}</p>
                             <p className="text-[10px] text-gray-400 mt-0.5">{p.supplierName || '—'}</p>
@@ -576,9 +589,18 @@ export default function CostosPage() {
                         const wasSaved  = savedId === p.id;
                         return (
                           <tr key={p.id} className={cn('hover:bg-red-50/30 transition-colors group', wasSaved && 'bg-success/5')}>
-                            <td className="px-5 py-3">
-                              <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
-                              <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
+                            <td className="px-5 py-2.5">
+                              <div className="flex items-center gap-2.5">
+                                {(() => { const img = getImg(p as unknown as RealProduct); return (
+                                  <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                                    {img ? <img src={img} alt={p.name} className="w-full h-full object-contain p-0.5" /> : <ImageIcon className="w-3 h-3 text-gray-300" />}
+                                  </div>
+                                ); })()}
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
+                                  <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-3 py-3 text-xs text-gray-500 font-mono">{p.sku || '—'}</td>
                             <td className="px-3 py-3">
@@ -711,9 +733,18 @@ export default function CostosPage() {
                       const wasSaved = savedId === p.id;
                       return (
                         <tr key={p.id} className={cn('hover:bg-gray-50/50 transition-colors group', isNeg && 'bg-danger/3', wasSaved && 'bg-success/5')}>
-                          <td className="px-5 py-3">
-                            <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
-                            <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
+                          <td className="px-5 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              {(() => { const img = getImg(p); return (
+                                <div className="w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                                  {img ? <img src={img} alt={p.name} className="w-full h-full object-contain p-0.5" /> : <ImageIcon className="w-3 h-3 text-gray-300" />}
+                                </div>
+                              ); })()}
+                              <div className="min-w-0">
+                                <div className="text-sm font-medium text-gray-900 line-clamp-1">{p.name}</div>
+                                <div className="text-[10px] text-gray-400">{p.category || '—'}</div>
+                              </div>
+                            </div>
                           </td>
                           <td className="px-3 py-3 text-xs text-gray-600">{p.supplierName || '—'}</td>
                           {/* Costo */}

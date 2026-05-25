@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 import { mlSearch } from '@/lib/ml-search-client';
 import { SeiqBadge, CATEGORIES as SEIQ_CATEGORIES } from '@/components/shared/seiq-import-modal';
+import { MLFichaModal } from '@/components/shared/ml-ficha-modal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -55,6 +56,7 @@ interface Product {
   supplierPrice?: number | null;
   supplierCode?: string | null;
   seiqCategory?: string | null;
+  terciarizado?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,9 +68,15 @@ interface Product {
  * No confía en el campo `status` importado (puede venir como 'active' en inglés
  * o desactualizado). Siempre lo deriva on-the-fly.
  */
-function derivedStatus(p: { cost: number; price: number; margin: number | null }): string {
+function derivedStatus(p: { cost: number; price: number; margin: number | null; terciarizado?: boolean }): string {
   if (!p.cost || p.cost === 0) return 'sin_costo';
   if (!p.price || p.price <= 1) return 'revisar';      // precio placeholder ($1 en Odoo)
+  // Terciarizado: modelo de intermediación — 8%+ es sano, <5% crítico
+  if (p.terciarizado) {
+    if (p.margin !== null && p.margin < 5)  return 'critico';
+    if (p.margin !== null && p.margin < 8)  return 'revisar';
+    return 'activo';
+  }
   if (p.margin !== null && p.margin < 35) return 'critico';
   return 'activo';
 }
@@ -107,8 +115,14 @@ function formatARS(n: number) {
   }).format(n);
 }
 
-function marginBadge(m: number | null) {
+function marginBadge(m: number | null, terciarizado = false) {
   if (m === null) return { bg: 'bg-gray-200 text-gray-500',  text: '—'      };
+  if (terciarizado) {
+    // Terciarizado: 8%+ = OK, 5-8% = warn, <5% = critical
+    if (m >= 8)  return { bg: 'bg-[#16A34A] text-white',    text: `${m}%` };
+    if (m >= 5)  return { bg: 'bg-[#F97316] text-white',    text: `${m}%` };
+    return           { bg: 'bg-[#EF4444] text-white',       text: `${m}%` };
+  }
   if (m >= 35)    return { bg: 'bg-[#16A34A] text-white',    text: `${m}%`  };
   if (m >= 20)    return { bg: 'bg-[#F97316] text-white',    text: `${m}%`  };
   return             { bg: 'bg-[#EF4444] text-white',        text: `${m}%`  };
@@ -147,6 +161,35 @@ function commercialReading(p: Product) {
     body: 'No hay costo cargado. Sin este dato no se puede calcular rentabilidad ni exportar con seguridad.',
     action: 'Completar costo antes de exportar.',
   };
+
+  // ── Modelo terciarizado: intermediación con ~10% de comisión ──
+  if (p.terciarizado) {
+    if (!p.price || p.price <= 1) return {
+      status: 'Revisar precio',
+      bg: 'bg-[#F97316]/8', textColor: 'text-[#F97316]', dot: 'bg-[#F97316]',
+      body: 'Producto terciarizado sin precio de venta. Cargá el precio que le pasás al cliente.',
+      action: 'Completar precio de venta al cliente.',
+    };
+    if (p.margin !== null && p.margin < 5) return {
+      status: 'Comisión crítica',
+      bg: 'bg-[#EF4444]/8', textColor: 'text-[#EF4444]', dot: 'bg-[#EF4444]',
+      body: `Comisión de ${p.margin}% por debajo del mínimo (5%). Renegociá condiciones con el tercero.`,
+      action: 'Renegociar comisión mínima del 8-10%.',
+    };
+    if (p.margin !== null && p.margin < 8) return {
+      status: 'Comisión ajustada',
+      bg: 'bg-[#F97316]/8', textColor: 'text-[#F97316]', dot: 'bg-[#F97316]',
+      body: `Comisión de ${p.margin}% por debajo del objetivo. Modelo de intermediación viable pero ajustado.`,
+      action: 'Apuntar a 8-12% de comisión.',
+    };
+    return {
+      status: 'Comisión OK',
+      bg: 'bg-[#16A34A]/8', textColor: 'text-[#16A34A]', dot: 'bg-[#16A34A]',
+      body: `Comisión de ${p.margin !== null ? p.margin + '%' : '—'} sobre el precio del tercero. Modelo de intermediación funcionando correctamente.`,
+      action: 'Asegurar que el cliente confirme antes de comprometer al tercero.',
+    };
+  }
+
   if (p.status === 'revisar') return {
     status: 'Revisar precio',
     bg: 'bg-[#F97316]/8', textColor: 'text-[#F97316]', dot: 'bg-[#F97316]',
@@ -346,16 +389,18 @@ function Row({ label, value, strong, mono }: {
 // PRODUCT INSPECTOR
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, onHide, onUnhide, supplierNames = [] }: {
+function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, onUpdate, onDelete, onHide, onUnhide, supplierNames = [], mlItemId, onViewMLFicha }: {
   product: Product;
   onClose: () => void;
   odooUrl?: string;
   onToggleActive?: (id: string, active: boolean) => void;
-  onUpdate?: (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string }) => void;
+  onUpdate?: (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string; terciarizado?: boolean }) => void;
   onDelete?: (id: string) => void;
   onHide?: (id: string) => void;
   onUnhide?: (id: string) => void;
   supplierNames?: string[];
+  mlItemId?: string;
+  onViewMLFicha?: (itemId: string) => void;
 }) {
   const [showMarket,   setShowMarket]   = useState(false);
   const [mlResults,   setMlResults]   = useState<Array<{ id: string; title: string; price: number; sold: number; url: string; seller: string; thumb: string | null }> | null>(null);
@@ -394,7 +439,8 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
       setMlSearching(false);
     }
   };
-  const [toggling,     setToggling]     = useState(false);
+  const [toggling,         setToggling]         = useState(false);
+  const [togglingTerc,     setTogglingTerc]     = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting,      setDeleting]      = useState(false);
 
@@ -610,10 +656,25 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
     }
   };
 
+  const handleToggleTerciarizado = async () => {
+    setTogglingTerc(true);
+    try {
+      const newVal = !p.terciarizado;
+      await fetch('/api/products', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id: p.id, terciarizado: newVal }),
+      });
+      onUpdate?.(p.id, { terciarizado: newVal } as Parameters<typeof onUpdate>[1]);
+    } finally {
+      setTogglingTerc(false);
+    }
+  };
+
   const sb        = statusBadge(p.status);
   const lists     = calcLists(p.price);
   const rd        = commercialReading(p);
-  const mb        = marginBadge(p.margin);
+  const mb        = marginBadge(p.margin, p.terciarizado);
   const utilidad  = p.price > 1 && p.cost > 0 ? p.price - p.cost : null;
   const marketUrls = getMarketUrls(p);
 
@@ -1059,6 +1120,50 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
           </div>
         </div>
 
+        {/* ── 4b. Tipo de producto ── */}
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                'inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black tracking-wide',
+                p.terciarizado
+                  ? 'bg-[#714B67] text-white'
+                  : 'bg-gray-100 text-gray-400',
+              )}>
+                {p.terciarizado ? 'TERCIARIZADO' : 'PROPIO'}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                {p.terciarizado
+                  ? 'Intermediación · Acqua cobra comisión ~10%'
+                  : 'Producto propio · margen objetivo 35%+'}
+              </span>
+            </div>
+            <button
+              onClick={handleToggleTerciarizado}
+              disabled={togglingTerc}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-all',
+                p.terciarizado
+                  ? 'bg-[#714B67]/10 border-[#714B67]/20 text-[#714B67] hover:bg-[#714B67]/20'
+                  : 'bg-gray-50 border-gray-200 text-gray-500 hover:border-[#714B67]/30 hover:text-[#714B67]',
+                togglingTerc && 'opacity-50',
+              )}
+            >
+              {togglingTerc ? '…' : p.terciarizado ? 'Quitar' : 'Marcar terciarizado'}
+            </button>
+          </div>
+
+          {p.terciarizado && (
+            <div className="mt-2 bg-[#714B67]/6 border border-[#714B67]/15 rounded-xl px-3 py-2.5">
+              <p className="text-[10px] text-[#714B67] leading-relaxed">
+                <strong>Modelo:</strong> el costo cargado es el precio que te pasa el tercero.
+                Vos le cobrás ese precio al cliente y te quedás con la diferencia (~10%).
+                Margen saludable para este modelo: <strong>8–12%</strong>.
+              </p>
+            </div>
+          )}
+        </div>
+
         {/* ── 5. Estado operativo ── */}
         <div className="px-4 py-3">
           <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase mb-2">
@@ -1379,16 +1484,24 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
             <button className="flex items-center justify-center gap-1.5 py-2.5 px-3 border border-gray-200 rounded-xl text-[11px] font-semibold text-gray-600 hover:bg-gray-50 transition-colors">
               <Edit2 className="w-3.5 h-3.5" /> Editar datos
             </button>
-            <button
-              onClick={() => {
-                onClose();
-                // Open ML assign modal for this product via a custom event
-                window.dispatchEvent(new CustomEvent('openMLAssign', { detail: { productId: p.id } }));
-              }}
-              className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[#FFE600] rounded-xl text-[11px] font-bold text-gray-900 hover:opacity-80 transition-opacity"
-            >
-              <ShoppingCart className="w-3.5 h-3.5" /> ML Lab
-            </button>
+            {mlItemId ? (
+              <button
+                onClick={() => onViewMLFicha?.(mlItemId)}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[#FFE600] rounded-xl text-[11px] font-bold text-gray-900 hover:opacity-80 transition-opacity col-span-2"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" /> Ver Ficha ML
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onClose();
+                  window.dispatchEvent(new CustomEvent('openMLAssign', { detail: { productId: p.id } }));
+                }}
+                className="flex items-center justify-center gap-1.5 py-2.5 px-3 bg-[#FFE600] rounded-xl text-[11px] font-bold text-gray-900 hover:opacity-80 transition-opacity"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" /> ML Lab
+              </button>
+            )}
           </div>
         </div>
 
@@ -1553,6 +1666,7 @@ export default function ProductosPage() {
   // ── MercadoLibre product tracking ──
   const { getMLConfig, setMLConfig, removeMLConfig, mlCounts } = useMLProducts();
   const [mlAssignTarget, setMlAssignTarget] = useState<Product | null>(null);
+  const [mlFichaTarget,  setMlFichaTarget]  = useState<{ itemId: string; product: Product } | null>(null);
 
   // ── ML Lab data (from acqua_ml_lab_v1) — para badge y filtro "En ML" ──
   const [mlLabMap, setMlLabMap] = useState<Map<string, { mlItemId: string; mlStatus: string; mlPrice: number }>>(new Map());
@@ -1576,6 +1690,11 @@ export default function ProductosPage() {
     const bySku  = p.sku    ? mlLabMap.get(p.sku.toLowerCase())  : undefined;
     const byOdoo = p.odooId ? mlLabMap.get(`odoo_${p.odooId}`)   : undefined;
     return bySku ?? byOdoo;
+  };
+
+  // Returns the ML item ID if this product has one (from config or lab)
+  const getMLItemId = (p: Product): string | undefined => {
+    return getMLConfig(p.id)?.mlItemId || getMLLabInfo(p)?.mlItemId || undefined;
   };
 
   // ── ML Pricelist IDs — products that appear in the Odoo ML pricelist ──
@@ -1653,7 +1772,7 @@ export default function ProductosPage() {
   };
 
   // ── Actualizar costo/precio desde el inspector ──
-  const handleProductUpdate = (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string }) => {
+  const handleProductUpdate = (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string; terciarizado?: boolean }) => {
     setSelected(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
   };
 
@@ -1768,8 +1887,9 @@ export default function ProductosPage() {
     // Solo productos activos para las stats
     const activos = products.filter(p => isActive(p) && !p.hidden);
     const inactivos = products.length - activos.length;
-    // Solo incluir en el promedio productos con precio y costo reales (excluye placeholders price=1)
-    const withMargin = activos.filter(p => p.margin !== null && p.price > 1 && p.cost > 0);
+    // Solo incluir en el promedio productos propios con precio y costo reales
+    // (excluye terciarizados — tienen modelo diferente — y placeholders price=1)
+    const withMargin = activos.filter(p => p.margin !== null && p.price > 1 && p.cost > 0 && !p.terciarizado);
     // Stock
     const conStock   = activos.filter(p => (p.stock ?? 0) > 0);
     const sinStock   = activos.filter(p => (p.stock ?? 0) === 0);
@@ -1917,12 +2037,9 @@ export default function ProductosPage() {
 
       {/* ── Layout principal ── */}
       <div className="max-w-[1680px] mx-auto px-5 lg:px-8 xl:px-12 py-5">
-        <div className={cn(
-          'grid grid-cols-1 gap-6 items-start',
-          inspectorOpen && 'lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px] 2xl:grid-cols-[minmax(0,1fr)_440px]',
-        )}>
+        <div>
 
-          {/* ─────── COLUMNA IZQUIERDA ─────── */}
+          {/* ─────── CONTENIDO PRINCIPAL (siempre full-width) ─────── */}
           <div className="min-w-0">
 
             {/* Socio Acqua — chips clickeables */}
@@ -2217,18 +2334,14 @@ export default function ProductosPage() {
                           Producto
                           <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('producto')} />
                         </th>
-                        {!inspectorOpen && (
-                          <th className="text-left px-3 py-2.5 hidden lg:table-cell relative group/th" style={{ width: colW.categoria, minWidth: 80 }}>
+                        <th className="text-left px-3 py-2.5 hidden lg:table-cell relative group/th" style={{ width: colW.categoria, minWidth: 80 }}>
                             Categoría
                             <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('categoria')} />
                           </th>
-                        )}
-                        {!inspectorOpen && (
-                          <th className="text-left px-3 py-2.5 hidden xl:table-cell relative group/th" style={{ width: colW.proveedor, minWidth: 80 }}>
+                        <th className="text-left px-3 py-2.5 hidden xl:table-cell relative group/th" style={{ width: colW.proveedor, minWidth: 80 }}>
                             Proveedor
                             <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('proveedor')} />
                           </th>
-                        )}
                         <th className="text-center px-3 py-2.5 relative group/th" style={{ width: colW.sku, minWidth: 60 }}>
                           SKU
                           <div className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize opacity-0 group-hover/th:opacity-100 hover:bg-acqua/40 transition-opacity" onMouseDown={startResize('sku')} />
@@ -2263,7 +2376,7 @@ export default function ProductosPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {paginated.map(p => {
-                        const mb2 = marginBadge(p.margin);
+                        const mb2 = marginBadge(p.margin, p.terciarizado);
                         const isSelected = selected?.id === p.id;
                         const inactive = !isActive(p);
                         const mlLab = getMLLabInfo(p);
@@ -2302,6 +2415,11 @@ export default function ProductosPage() {
                                     <p className="text-[10px] text-gray-400">
                                       {p.uom}{p.tag && ` · ${p.tag}`}
                                     </p>
+                                    {p.terciarizado && (
+                                      <span className="inline-flex items-center px-1.5 py-px rounded text-[8px] font-black bg-[#714B67] text-white leading-none tracking-wide" title="Producto terciarizado — comisión ~10%">
+                                        T
+                                      </span>
+                                    )}
                                     {mlLab && (
                                       <span className="inline-flex items-center px-1 py-px rounded text-[8px] font-black bg-[#FFE600] text-[#07111F] leading-none">
                                         ML
@@ -2312,20 +2430,16 @@ export default function ProductosPage() {
                                 </div>
                               </div>
                             </td>
-                            {!inspectorOpen && (
-                              <td className="px-3 py-2.5 hidden lg:table-cell">
+                            <td className="px-3 py-2.5 hidden lg:table-cell">
                                 <span className="text-[11px] text-gray-500 line-clamp-1">
                                   {p.category || '—'}
                                 </span>
                               </td>
-                            )}
-                            {!inspectorOpen && (
-                              <td className="px-3 py-2.5 hidden xl:table-cell">
+                            <td className="px-3 py-2.5 hidden xl:table-cell">
                                 <span className="text-[11px] text-gray-600 font-medium line-clamp-1">
                                   {p.supplierName || <span className="text-gray-400">—</span>}
                                 </span>
                               </td>
-                            )}
                             <td className="px-3 py-2.5 text-center">
                               {p.sku
                                 ? <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{p.sku}</span>
@@ -2384,10 +2498,26 @@ export default function ProductosPage() {
                               onClick={e => e.stopPropagation()}
                             >
                               {(() => {
-                                const mlCfg = getMLConfig(p.id);
-                                const inPL  = isInMLPricelist(p);
+                                const mlCfg   = getMLConfig(p.id);
+                                const mlLabId = getMLItemId(p);
+                                const inPL    = isInMLPricelist(p);
                                 if (mlCfg) {
                                   const c = ML_STATUS_COLORS[mlCfg.mlStatus];
+                                  // If there's a linked publication → open ficha; else → config modal
+                                  if (mlLabId) {
+                                    return (
+                                      <button
+                                        onClick={() => setMlFichaTarget({ itemId: mlLabId, product: p })}
+                                        title={`Ver Ficha ML · ${ML_STATUS_LABELS[mlCfg.mlStatus]}`}
+                                        className={cn(
+                                          'w-6 h-6 flex items-center justify-center rounded-md border transition-all',
+                                          c.bg, c.border,
+                                        )}
+                                      >
+                                        <span className={cn('w-2 h-2 rounded-full', c.dot)} />
+                                      </button>
+                                    );
+                                  }
                                   return (
                                     <button
                                       onClick={() => setMlAssignTarget(p)}
@@ -2398,6 +2528,17 @@ export default function ProductosPage() {
                                       )}
                                     >
                                       <span className={cn('w-2 h-2 rounded-full', c.dot)} />
+                                    </button>
+                                  );
+                                }
+                                if (mlLabId) {
+                                  return (
+                                    <button
+                                      onClick={() => setMlFichaTarget({ itemId: mlLabId, product: p })}
+                                      title="Ver Ficha ML"
+                                      className="w-6 h-6 flex items-center justify-center rounded-md bg-[#FFE600]/30 border border-[#FFE600]/60 text-[#07111F]"
+                                    >
+                                      <ShoppingCart className="w-3 h-3" />
                                     </button>
                                   );
                                 }
@@ -2469,14 +2610,9 @@ export default function ProductosPage() {
             {/* ─── GRID ─── */}
             {view === 'grid' && (
               <>
-                <div className={cn(
-                  'grid gap-3',
-                  inspectorOpen
-                    ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-                    : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4',
-                )}>
+                <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                   {paginated.map(p => {
-                    const mb2 = marginBadge(p.margin);
+                    const mb2 = marginBadge(p.margin, p.terciarizado);
                     const sb  = statusBadge(p.status);
                     const isSelected = selected?.id === p.id;
                     const inactive = !isActive(p);
@@ -2654,24 +2790,7 @@ export default function ProductosPage() {
             )}
           </div>
 
-          {/* ─────── COLUMNA DERECHA: INSPECTOR (desktop) ─────── */}
-          {inspectorOpen && (
-            <div className="hidden lg:block">
-              {/* top-[62px] = header (58px) + 4px gap. max-h para que sea scrolleable dentro del viewport */}
-              <div className="sticky top-[62px] max-h-[calc(100vh-70px)] overflow-y-auto rounded-2xl">
-                {selected && <ProductInspector product={selected} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />}
-              </div>
-            </div>
-          )}
-
         </div>
-
-        {/* Inspector mobile (debajo de la lista) */}
-        {inspectorOpen && (
-          <div className="lg:hidden mt-5">
-            <ProductInspector product={selected!} onClose={() => setSelected(null)} odooUrl={odooUrl} onToggleActive={handleToggleActive} onUpdate={handleProductUpdate} onDelete={handleDelete} onHide={handleHide} onUnhide={handleUnhide} supplierNames={supplierNameOptions} />
-          </div>
-        )}
 
       </div>
 
@@ -2728,6 +2847,46 @@ export default function ProductosPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── Product Inspector Modal ── */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6"
+          onClick={() => setSelected(null)}
+        >
+          {/* Backdrop */}
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          {/* Panel */}
+          <div
+            className="relative w-full max-w-[960px] z-10"
+            onClick={e => e.stopPropagation()}
+          >
+            <ProductInspector
+              product={selected}
+              onClose={() => setSelected(null)}
+              odooUrl={odooUrl}
+              onToggleActive={handleToggleActive}
+              onUpdate={handleProductUpdate}
+              onDelete={handleDelete}
+              onHide={handleHide}
+              onUnhide={handleUnhide}
+              supplierNames={supplierNameOptions}
+              mlItemId={getMLItemId(selected)}
+              onViewMLFicha={(itemId) => setMlFichaTarget({ itemId, product: selected })}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── ML Ficha Modal ── */}
+      {mlFichaTarget && (
+        <MLFichaModal
+          itemId={mlFichaTarget.itemId}
+          productName={mlFichaTarget.product.name}
+          localPrice={mlFichaTarget.product.price}
+          onClose={() => setMlFichaTarget(null)}
+        />
       )}
 
       {/* ── ML Assign Modal ── */}

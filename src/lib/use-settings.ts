@@ -5,6 +5,7 @@ export interface AppSettings {
   odooServerUrl: string;
   odooUsername:  string;
   odooApiKey:    string;
+  odooDbName:    string;
   // MercadoLibre API — escaneo de competencia
   mlAppId:     string;
   mlAppSecret: string;
@@ -17,6 +18,7 @@ const DEFAULT: AppSettings = {
   odooServerUrl: '',
   odooUsername:  '',
   odooApiKey:    '',
+  odooDbName:    '',
   mlAppId:       '',
   mlAppSecret:   '',
   mlSite:        'MLA',

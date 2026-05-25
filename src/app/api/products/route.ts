@@ -79,6 +79,7 @@ export async function PATCH(req: NextRequest) {
       supplierName?: string;
       supplierPrice?: number;
       supplierCode?: string;
+      terciarizado?: boolean;
       source?: string;
     };
 
@@ -126,6 +127,9 @@ export async function PATCH(req: NextRequest) {
     }
     if (typeof body.supplierCode === 'string') {
       updates.supplierCode = body.supplierCode;
+    }
+    if (typeof body.terciarizado === 'boolean') {
+      updates.terciarizado = body.terciarizado;
     }
 
     if (Object.keys(updates).length === 0) {

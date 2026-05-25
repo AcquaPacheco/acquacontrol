@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import productsData from '@/data/products.json';
 import { cn } from '@/lib/utils';
+import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 import {
   TrendingUp, TrendingDown, Package, AlertTriangle,
   ChevronRight, Search, ArrowUpRight, Layers,
-  Users, Star, X,
+  Users, Star, X, Image as ImageIcon,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -18,6 +20,8 @@ interface Product {
   cost: number; price: number; margin: number | null;
   supplierName: string | null; category: string | null;
   active: boolean;
+  odooId?: number | null;
+  image?: string | null;
 }
 
 const allProds = (productsData as unknown as (Product & { hidden?: boolean })[]).filter(p => p.active !== false && !p.hidden);
@@ -221,8 +225,8 @@ function MarginBar({ value, max, bg }: { value: number; max: number; bg: string 
 // ─────────────────────────────────────────────────────────────────────────────
 
 function ProductDrawer({
-  title, products, onClose,
-}: { title: string; products: Product[]; onClose: () => void }) {
+  title, products, onClose, odooUrl,
+}: { title: string; products: Product[]; onClose: () => void; odooUrl: string }) {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'margin_asc' | 'margin_desc' | 'name'>('margin_asc');
 
@@ -239,19 +243,34 @@ function ProductDrawer({
   const margins  = filtered.map(p => p.margin as number);
   const avgM     = margins.length ? avg(margins) : 0;
 
+  const getImg = (p: Product) =>
+    p.image || buildOdooImageUrl(p.odooId ?? null, 'product.template', odooUrl);
+
   return (
     <div className="fixed inset-0 z-50 flex" onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ background: 'rgba(7,17,31,0.45)', backdropFilter: 'blur(3px)' }}>
-      <div className="ml-auto w-full max-w-xl bg-white h-full flex flex-col shadow-2xl">
+      style={{ background: 'rgba(7,17,31,0.55)', backdropFilter: 'blur(4px)' }}>
+      <div className="ml-auto w-full max-w-[520px] bg-white h-full flex flex-col shadow-2xl">
+
         {/* Header */}
         <div className="shrink-0 px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
           <div>
             <h3 className="text-[15px] font-black text-gray-900">{title}</h3>
             <p className="text-[11px] text-gray-400">{filtered.length} productos · margen promedio {pct(avgM)}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5">
+            <Link
+              href={`/productos?supplier=${encodeURIComponent(title)}`}
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-[#07111F] text-white rounded-lg hover:opacity-80 transition-opacity"
+              title="Ver en Productos"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              Ver en Productos
+            </Link>
+            <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400 transition-colors">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Filters */}
@@ -273,25 +292,58 @@ function ProductDrawer({
         {/* List */}
         <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
           {filtered.map(p => {
-            const band = marginBand(p.margin as number);
+            const band  = marginBand(p.margin as number);
+            const imgSrc = getImg(p);
             return (
-              <div key={p.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors">
+              <div key={p.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-[#07111F]/[0.02] transition-colors group">
+
+                {/* Foto */}
+                <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                  {imgSrc ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={imgSrc} alt={p.name} className="w-full h-full object-contain p-0.5" />
+                  ) : (
+                    <ImageIcon className="w-4 h-4 text-gray-300" />
+                  )}
+                </div>
+
+                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    {p.sku && <span className="text-[9px] font-mono text-gray-400">{p.sku}</span>}
-                    {p.supplierName && <span className="text-[9px] text-gray-400 truncate">{p.supplierName}</span>}
+                    {p.sku && (
+                      <span className="text-[9px] font-mono text-gray-400 bg-gray-100 px-1 py-px rounded">{p.sku}</span>
+                    )}
+                    {p.supplierName && (
+                      <span className="text-[9px] text-gray-400 truncate max-w-[120px]">{p.supplierName}</span>
+                    )}
                   </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <div className="text-[11px] text-gray-400">{fmt(p.cost)} → {fmt(p.price)}</div>
-                  <span className={cn('text-[13px] font-black', band.color)}>{pct(p.margin as number)}</span>
+
+                {/* Margin + prices + link */}
+                <div className="shrink-0 text-right flex items-center gap-2">
+                  <div>
+                    <div className="text-[10px] text-gray-400 tabular-nums">{fmt(p.cost)} → {fmt(p.price)}</div>
+                    <span className={cn('text-[14px] font-black tabular-nums', band.color)}>
+                      {pct(p.margin as number)}
+                    </span>
+                  </div>
+                  <Link
+                    href={`/productos?search=${encodeURIComponent(p.name.slice(0, 60))}`}
+                    onClick={onClose}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-[#07111F] hover:bg-gray-100 transition-all opacity-0 group-hover:opacity-100"
+                    title="Ver en Productos"
+                  >
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </Link>
                 </div>
               </div>
             );
           })}
+
           {sinDatos.length > 0 && (
-            <div className="px-5 py-3 bg-gray-50">
+            <div className="px-4 py-3 bg-gray-50 flex items-center gap-2">
+              <Package className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <p className="text-[11px] text-gray-400 font-semibold">{sinDatos.length} sin costo/precio — no calculable</p>
             </div>
           )}
@@ -309,6 +361,13 @@ export default function RentabilidadPage() {
   const [drawerData, setDrawerData] = useState<{ title: string; products: Product[] } | null>(null);
   const [activeView, setActiveView] = useState<'categorias' | 'proveedores'>('categorias');
   const [search, setSearch] = useState('');
+
+  const { settings } = useSettings();
+  const odooUrl = settings?.odooServerUrl ?? '';
+
+  function getImg(p: Product) {
+    return p.image || buildOdooImageUrl(p.odooId ?? null, 'product.template', odooUrl);
+  }
 
   // Global stats
   const globalAvg  = avg(withData.map(p => p.margin as number));
@@ -532,16 +591,36 @@ export default function RentabilidadPage() {
                   .filter(p => (p.margin ?? 0) < 35)
                   .sort((a, b) => (a.margin ?? 0) - (b.margin ?? 0))
                   .slice(0, 10)
-                  .map(p => (
-                    <div key={p.id} className="flex items-center gap-3 py-1.5">
-                      <TrendingDown className="w-3.5 h-3.5 text-[#EF4444] shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[11px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
-                        <p className="text-[9px] text-gray-400">{p.supplierName} · {fmt(p.cost)} → {fmt(p.price)}</p>
+                  .map(p => {
+                    const imgSrc = getImg(p);
+                    return (
+                      <div key={p.id} className="flex items-center gap-2.5 py-1 group">
+                        {/* Thumbnail */}
+                        <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                          {imgSrc ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={imgSrc} alt={p.name} className="w-full h-full object-contain p-0.5" />
+                          ) : (
+                            <ImageIcon className="w-3.5 h-3.5 text-gray-300" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
+                          <p className="text-[9px] text-gray-400">{p.supplierName} · {fmt(p.cost)} → {fmt(p.price)}</p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-[13px] font-black text-[#EF4444]">{pct(p.margin ?? 0)}</span>
+                          <Link
+                            href={`/productos?search=${encodeURIComponent(p.name.slice(0, 60))}`}
+                            className="w-6 h-6 flex items-center justify-center rounded-md text-gray-300 hover:text-[#07111F] hover:bg-gray-100 transition-all opacity-0 group-hover:opacity-100"
+                            title="Ver en Productos"
+                          >
+                            <ArrowUpRight className="w-3 h-3" />
+                          </Link>
+                        </div>
                       </div>
-                      <span className="text-[13px] font-black text-[#EF4444] shrink-0">{pct(p.margin ?? 0)}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 {bajo35 > 10 && (
                   <button
                     onClick={() => setDrawerData({
@@ -569,16 +648,36 @@ export default function RentabilidadPage() {
                 .filter(p => (p.margin ?? 0) >= 70)
                 .sort((a, b) => (b.margin ?? 0) - (a.margin ?? 0))
                 .slice(0, 10)
-                .map(p => (
-                  <div key={p.id} className="flex items-center gap-3 py-1.5">
-                    <TrendingUp className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[11px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
-                      <p className="text-[9px] text-gray-400">{p.supplierName} · {fmt(p.cost)} → {fmt(p.price)}</p>
+                .map(p => {
+                  const imgSrc = getImg(p);
+                  return (
+                    <div key={p.id} className="flex items-center gap-2.5 py-1 group">
+                      {/* Thumbnail */}
+                      <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                        {imgSrc ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={imgSrc} alt={p.name} className="w-full h-full object-contain p-0.5" />
+                        ) : (
+                          <ImageIcon className="w-3.5 h-3.5 text-gray-300" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[11px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
+                        <p className="text-[9px] text-gray-400">{p.supplierName} · {fmt(p.cost)} → {fmt(p.price)}</p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[13px] font-black text-[#15803D]">{pct(p.margin ?? 0)}</span>
+                        <Link
+                          href={`/productos?search=${encodeURIComponent(p.name.slice(0, 60))}`}
+                          className="w-6 h-6 flex items-center justify-center rounded-md text-gray-300 hover:text-[#07111F] hover:bg-gray-100 transition-all opacity-0 group-hover:opacity-100"
+                          title="Ver en Productos"
+                        >
+                          <ArrowUpRight className="w-3 h-3" />
+                        </Link>
+                      </div>
                     </div>
-                    <span className="text-[13px] font-black text-[#15803D] shrink-0">{pct(p.margin ?? 0)}</span>
-                  </div>
-                ))}
+                  );
+                })}
               {estrella > 10 && (
                 <button
                   onClick={() => setDrawerData({
@@ -625,6 +724,7 @@ export default function RentabilidadPage() {
           title={drawerData.title}
           products={drawerData.products}
           onClose={() => setDrawerData(null)}
+          odooUrl={odooUrl}
         />
       )}
     </div>

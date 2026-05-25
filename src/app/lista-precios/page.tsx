@@ -3,8 +3,9 @@
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import productsData from '@/data/products.json';
-import { ArrowLeft, Printer, Search, ChevronDown, FileText, Tag } from 'lucide-react';
+import { ArrowLeft, Printer, Search, ChevronDown, FileText, Tag, Image as ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,8 @@ interface Product {
   hidden: boolean;
   stock: number;
   seiqCategory?: string | null;
+  image?: string | null;
+  odooId?: number | null;
 }
 
 interface Lista {
@@ -72,6 +75,11 @@ export default function ListaPreciosPage() {
   const [pagos,    setPagos]    = useState<Pago[]>([]);
   const [redondeo, setRedondeo] = useState({ multiplo: 10, siempreArriba: true });
   const [loaded,   setLoaded]   = useState(false);
+
+  const { settings } = useSettings();
+  const odooUrl = settings?.odooServerUrl ?? '';
+  const getImg = (p: Product) =>
+    p.image || buildOdooImageUrl(p.odooId ?? null, 'product.template', odooUrl);
 
   useEffect(() => {
     fetch('/api/params').then(r => r.json()).then((d: {
@@ -364,14 +372,26 @@ export default function ListaPreciosPage() {
                         )}
                       >
                         <td className={cn('px-4', compact ? 'py-1' : 'py-2.5')}>
-                          <div className="font-medium text-gray-900 leading-snug">
-                            {p.name}
+                          <div className="flex items-center gap-2.5">
+                            {/* Foto — solo en pantalla, no en impresión */}
+                            {!compact && (() => { const img = getImg(p); return (
+                              <div className="print:hidden w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                                {img
+                                  ? <img src={img} alt={p.name} className="w-full h-full object-contain p-0.5" />
+                                  : <ImageIcon className="w-3 h-3 text-gray-300" />}
+                              </div>
+                            ); })()}
+                            <div className="min-w-0">
+                              <div className="font-medium text-gray-900 leading-snug">
+                                {p.name}
+                              </div>
+                              {p.seiqCategory && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 print:hidden">
+                                  <Tag className="w-2.5 h-2.5" /> {p.seiqCategory}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          {p.seiqCategory && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 print:hidden">
-                              <Tag className="w-2.5 h-2.5" /> {p.seiqCategory}
-                            </span>
-                          )}
                         </td>
                         <td className={cn('px-4 hidden sm:table-cell print:table-cell', compact ? 'py-1' : 'py-2.5')}>
                           {p.sku

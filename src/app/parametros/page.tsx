@@ -1809,6 +1809,16 @@ function SeccionOdoo() {
     setSyncing(true);
     setSyncResult(null);
     try {
+      // Guardar credenciales antes de sincronizar (por si no hizo click en Guardar)
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          odooServerUrl: url.replace(/\/$/, ''),
+          odooUsername:  username.trim(),
+          odooApiKey:    apiKey.trim(),
+        }),
+      });
       const res = await fetch('/api/sync-stock-odoo', { method: 'POST' });
       const data = await res.json() as { ok: boolean; message?: string; error?: string; withStock?: number; matched?: number; unmatched?: number };
       setSyncResult(data);

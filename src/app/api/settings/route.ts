@@ -8,6 +8,7 @@ interface Settings {
   odooServerUrl: string;
   odooUsername:  string;
   odooApiKey:    string;
+  odooDbName:    string;
   mlAppId:       string;
   mlAppSecret:   string;
   mlSite:        string;
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: Settings = {
   odooServerUrl: '',
   odooUsername:  '',
   odooApiKey:    '',
+  odooDbName:    '',
   mlAppId:       '',
   mlAppSecret:   '',
   mlSite:        'MLA',
