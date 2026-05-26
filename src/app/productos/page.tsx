@@ -11,7 +11,7 @@ import {
   X, ExternalLink, Copy, Edit2,
   Truck, Star, ArrowUpRight, ChevronRight,
   Globe, AlertTriangle, Check,
-  Tag, Eye, EyeOff, ShoppingCart, RefreshCw, Trash2,
+  Tag, Eye, EyeOff, ShoppingCart, RefreshCw, Trash2, Layers,
 } from 'lucide-react';
 import { useMLProducts, ML_STATUS_LABELS, ML_STATUS_COLORS, MLStatus, MLProductConfig } from '@/lib/use-ml-products';
 import Link from 'next/link';
@@ -20,6 +20,7 @@ import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 import { mlSearch } from '@/lib/ml-search-client';
 import { SeiqBadge, CATEGORIES as SEIQ_CATEGORIES } from '@/components/shared/seiq-import-modal';
 import { MLFichaModal } from '@/components/shared/ml-ficha-modal';
+import { KitBuilderModal, KitProduct } from '@/components/shared/kit-builder-modal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -57,6 +58,8 @@ interface Product {
   supplierCode?: string | null;
   seiqCategory?: string | null;
   terciarizado?: boolean;
+  type?: string;
+  kitComponents?: Array<{ productId: string; productName: string; qty: number; unitCost: number; subtotal: number; image: string | null }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,26 +84,31 @@ function derivedStatus(p: { cost: number; price: number; margin: number | null; 
   return 'activo';
 }
 
-const products = (productsData as unknown as Product[]).map(p => ({
-  ...p,
-  active:  p.active  !== false,   // default true si el campo no existe
-  hidden:  p.hidden  === true,    // default false
-  stock:   typeof p.stock === 'number' ? p.stock : 0,
-  status:  derivedStatus(p),
-}));
+function processProducts(raw: unknown[]): Product[] {
+  return (raw as Product[]).map(p => ({
+    ...p,
+    active:  p.active  !== false,
+    hidden:  p.hidden  === true,
+    stock:   typeof p.stock === 'number' ? p.stock : 0,
+    status:  derivedStatus(p),
+  }));
+}
+
+// Initial (build-time) snapshot — used for SSR and as loading state
+const initialProducts = processProducts(productsData as unknown as unknown[]);
 
 const allCategories = ['Todas', ...Array.from(new Set(
-  products.map(p => (p.category || 'Sin categoría').split(' / ')[0])
+  initialProducts.map(p => (p.category || 'Sin categoría').split(' / ')[0])
 )).sort()];
 
 const allSuppliers = ['Todos', ...Array.from(new Set(
-  products.map(p => p.supplierName || 'Sin proveedor')
+  initialProducts.map(p => p.supplierName || 'Sin proveedor')
 )).sort()];
 
 // Lista de nombres de proveedores reales (para el dropdown del inspector)
 const supplierNameOptions: string[] = Array.from(new Set([
   ...(suppliersContactsRaw as Array<{ name: string }>).map(s => s.name),
-  ...products.filter(p => p.supplierName).map(p => p.supplierName as string),
+  ...initialProducts.filter(p => p.supplierName).map(p => p.supplierName as string),
 ])).sort();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,6 +416,12 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
   const [showLists,    setShowLists]    = useState(true);
   const [copied,       setCopied]       = useState<string | null>(null);
 
+  // ── Competitor prices ─────────────────────────────────────────────────────
+  const [compSearching, setCompSearching] = useState(false);
+  const [compResults,   setCompResults]   = useState<Record<string, Array<{ name: string; price: number; url: string; image: string | null }>> | null>(null);
+  const [savedLinks,    setSavedLinks]    = useState<Record<string, { url: string; name: string; price?: number }> | null>(null);
+  const [linkLoading,   setLinkLoading]   = useState(false);
+
   // ── Markup simulator ──────────────────────────────────────────────────────
   const [simMode, setSimMode] = useState<'markup' | 'precio' | null>(null);
   const [simVal,  setSimVal]  = useState('');
@@ -439,6 +453,95 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
       setMlSearching(false);
     }
   };
+  // Load competitor links when product changes
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/competitor-links?productId=${encodeURIComponent(p.id)}`)
+      .then(r => r.json())
+      .then((d: Record<string, { url: string; name: string; price?: number }>) => {
+        if (!cancelled) setSavedLinks(Object.keys(d).length > 0 ? d : null);
+      })
+      .catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.id]);
+
+  const searchCompetitors = async () => {
+    setCompSearching(true);
+    setCompResults(null);
+    try {
+      const q   = encodeURIComponent(p.name.replace(/['"]/g, '').slice(0, 60));
+      const res = await fetch(`/api/scrape-prices?q=${q}&stores=jumbo,carrefour,vital`);
+      const data = await res.json() as { ok: boolean; results: Array<{ store: string; ok: boolean; products: Array<{ name: string; price: number; url: string; image: string | null }> }> };
+      if (data.ok) {
+        const byStore: Record<string, Array<{ name: string; price: number; url: string; image: string | null }>> = {};
+        for (const r of data.results) byStore[r.store] = r.products;
+        setCompResults(byStore);
+      } else {
+        setCompResults({});
+      }
+    } catch {
+      setCompResults({});
+    } finally {
+      setCompSearching(false);
+    }
+  };
+
+  const linkToStore = async (store: string, product: { name: string; price: number; url: string }) => {
+    setLinkLoading(true);
+    try {
+      await fetch('/api/competitor-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: p.id, store, url: product.url, name: product.name, price: product.price }),
+      });
+      setSavedLinks(prev => ({
+        ...(prev ?? {}),
+        [store]: { url: product.url, name: product.name, price: product.price },
+      }));
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const unlinkStore = async (store: string) => {
+    setLinkLoading(true);
+    try {
+      await fetch('/api/competitor-links', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: p.id, store }),
+      });
+      setSavedLinks(prev => {
+        if (!prev) return null;
+        const copy = { ...prev };
+        delete copy[store];
+        return Object.keys(copy).length > 0 ? copy : null;
+      });
+    } finally {
+      setLinkLoading(false);
+    }
+  };
+
+  const applyCostFromVital = async (newCost: number) => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id, cost: Math.round(newCost * 100) / 100, source: 'vital_sync' }),
+      });
+      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+      if (data.ok && data.updates) {
+        onUpdate?.(p.id, data.updates);
+        setSaved('Costo actualizado desde Vital ✓');
+        setTimeout(() => setSaved(null), 3000);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const [toggling,         setToggling]         = useState(false);
   const [togglingTerc,     setTogglingTerc]     = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1164,6 +1267,37 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
           )}
         </div>
 
+        {/* ── 5b. Kit components (solo si es kit) ── */}
+        {p.type === 'kit' && p.kitComponents && p.kitComponents.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-100">
+            <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase mb-2 flex items-center gap-1.5">
+              <Layers className="w-3 h-3" /> Componentes del kit
+            </p>
+            <div className="space-y-1.5">
+              {p.kitComponents.map((c, i) => (
+                <div key={c.productId} className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
+                  <span className="text-[9px] font-bold text-gray-300 w-3">{i + 1}</span>
+                  {c.image && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.image} alt={c.productName} className="w-7 h-7 rounded-lg object-contain bg-white border border-gray-100 p-0.5 shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold text-gray-900 line-clamp-1">{c.productName}</p>
+                    <p className="text-[9px] text-gray-400">{formatARS(c.unitCost)} × {c.qty}</p>
+                  </div>
+                  <span className="text-[11px] font-black text-gray-700 shrink-0">{formatARS(c.subtotal)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between px-3 pt-1">
+                <span className="text-[10px] text-gray-500 font-semibold">Costo total del kit</span>
+                <span className="text-[13px] font-black text-[#07111F]">
+                  {formatARS(p.kitComponents.reduce((s, c) => s + c.subtotal, 0))}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── 5. Estado operativo ── */}
         <div className="px-4 py-3">
           <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase mb-2">
@@ -1293,6 +1427,183 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
                   </div>
                 )}
               </div>
+              {/* ── Competitor prices: Jumbo / Carrefour / Vital ── */}
+              {(() => {
+                const STORES = [
+                  { key: 'jumbo',     label: 'Jumbo',     dotCls: 'bg-red-500',   hasIVA: false },
+                  { key: 'carrefour', label: 'Carrefour', dotCls: 'bg-blue-600',  hasIVA: false },
+                  { key: 'vital',     label: 'Vital',     dotCls: 'bg-green-600', hasIVA: true  },
+                ] as const;
+
+                return (
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                        Supermercados y Vital
+                      </p>
+                      <button
+                        onClick={searchCompetitors}
+                        disabled={compSearching}
+                        className="flex items-center gap-1 text-[10px] font-semibold px-2 py-1 bg-gray-800 text-white rounded-md hover:opacity-80 disabled:opacity-50 transition-all"
+                      >
+                        <RefreshCw className={cn('w-3 h-3', compSearching && 'animate-spin')} />
+                        {compSearching ? 'Buscando…' : compResults ? 'Actualizar' : 'Buscar precios'}
+                      </button>
+                    </div>
+
+                    {/* Empty state */}
+                    {!compResults && !compSearching && (
+                      <p className="text-[11px] text-gray-400 text-center py-2">
+                        Buscá precios en Jumbo, Carrefour y Vital para comparar con tu costo
+                      </p>
+                    )}
+
+                    {/* Loading */}
+                    {compSearching && (
+                      <div className="flex items-center justify-center py-3 gap-2 text-gray-400">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span className="text-[11px]">Consultando tiendas…</span>
+                      </div>
+                    )}
+
+                    {/* Results per store */}
+                    {compResults && (
+                      <div className="space-y-3">
+                        {STORES.map(store => {
+                          const results = compResults[store.key] ?? [];
+                          const linked  = savedLinks?.[store.key];
+
+                          return (
+                            <div key={store.key}>
+                              {/* Store label */}
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', store.dotCls)} />
+                                <span className="text-[10px] font-bold text-gray-600">{store.label}</span>
+                                {store.hasIVA && (
+                                  <span className="text-[9px] text-gray-400">· precios con IVA</span>
+                                )}
+                              </div>
+
+                              {/* Linked product banner */}
+                              {linked && (
+                                <div className="bg-white border border-green-200 rounded-lg p-2 mb-1 flex items-start gap-2">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-[9px] font-bold text-green-600 uppercase tracking-wider mb-0.5">Vinculado</p>
+                                    <p className="text-[10px] font-semibold text-gray-800 line-clamp-1">{linked.name}</p>
+                                    {linked.price && (
+                                      <div className="flex items-center gap-2 mt-0.5">
+                                        <span className="text-[11px] font-bold text-gray-900">
+                                          {formatARS(linked.price)}
+                                        </span>
+                                        {store.hasIVA && (
+                                          <span className="text-[10px] text-gray-500">
+                                            sin IVA: {formatARS(Math.round(linked.price / 1.21))}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
+                                    {/* Vital consultant recommendation */}
+                                    {store.hasIVA && linked.price && p.cost > 0 && (() => {
+                                      const sinIva = linked.price / 1.21;
+                                      const diff   = Math.abs(sinIva - p.cost) / p.cost;
+                                      if (diff < 0.05) return null;
+                                      const isHigher = sinIva > p.cost;
+                                      return (
+                                        <div className={cn(
+                                          'mt-1.5 p-1.5 rounded-lg text-[10px] border',
+                                          isHigher
+                                            ? 'bg-red-50 border-red-100 text-red-700'
+                                            : 'bg-emerald-50 border-emerald-100 text-emerald-700',
+                                        )}>
+                                          <span className="font-bold">💡 Consultor: </span>
+                                          {isHigher
+                                            ? `Vital subió a ${formatARS(linked.price)} (sin IVA: ${formatARS(Math.round(sinIva))}). Tu costo guardado es ${formatARS(p.cost)}.`
+                                            : `Vital bajó a ${formatARS(linked.price)} (sin IVA: ${formatARS(Math.round(sinIva))}). Podés mejorar tu costo.`}
+                                          <button
+                                            onClick={() => applyCostFromVital(sinIva)}
+                                            className="ml-1 underline font-bold hover:no-underline"
+                                          >
+                                            Aplicar costo
+                                          </button>
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
+                                  <div className="flex flex-col gap-1 shrink-0">
+                                    <a
+                                      href={linked.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="w-6 h-6 flex items-center justify-center rounded-md bg-gray-100 hover:bg-gray-200 text-gray-400 hover:text-gray-700 transition-colors"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                    </a>
+                                    <button
+                                      onClick={() => unlinkStore(store.key)}
+                                      disabled={linkLoading}
+                                      className="w-6 h-6 flex items-center justify-center rounded-md bg-gray-100 hover:bg-red-100 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                                      title="Desvincular"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Search results */}
+                              {results.length === 0 && !linked && (
+                                <p className="text-[10px] text-gray-400 pl-2">Sin resultados</p>
+                              )}
+                              {results.length > 0 && (
+                                <div className="space-y-1">
+                                  {results.slice(0, 3).map((r, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-gray-100 hover:border-gray-200 transition-colors"
+                                    >
+                                      {r.image && (
+                                        <img src={r.image} alt="" className="w-7 h-7 object-cover rounded shrink-0 border border-gray-100" />
+                                      )}
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[10px] text-gray-700 line-clamp-1">{r.name}</p>
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[11px] font-bold text-gray-900">{formatARS(r.price)}</span>
+                                          {store.hasIVA && (
+                                            <span className="text-[9px] text-gray-400">sin IVA: {formatARS(Math.round(r.price / 1.21))}</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <a
+                                          href={r.url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="w-5 h-5 flex items-center justify-center rounded text-gray-300 hover:text-gray-600 transition-colors"
+                                        >
+                                          <ExternalLink className="w-2.5 h-2.5" />
+                                        </a>
+                                        <button
+                                          onClick={() => linkToStore(store.key, r)}
+                                          disabled={linkLoading}
+                                          className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-800 text-white hover:bg-gray-700 disabled:opacity-50 transition-all"
+                                        >
+                                          Vincular
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* External links */}
               <div className="flex flex-wrap gap-1.5">
                 {marketUrls.map(m => (
@@ -1653,6 +1964,19 @@ function Pagination({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProductosPage() {
+  // ── Products: start from build-time snapshot, refresh from API on mount ──
+  // (This ensures Railway deployments always show live data after hydration)
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  useEffect(() => {
+    fetch('/api/products?showHidden=true')
+      .then(r => r.json())
+      .then((data: unknown) => {
+        if (Array.isArray(data)) setProducts(processProducts(data as unknown[]));
+      })
+      .catch(() => { /* keep static snapshot on error */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [selected,      setSelected]      = useState<Product | null>(null);
   const [search,        setSearch]        = useState('');
   const [category,      setCategory]      = useState('Todas');
@@ -1743,6 +2067,10 @@ export default function ProductosPage() {
   // Helper para obtener la URL de imagen de un producto
   const getImg = (p: Product) =>
     p.image || buildOdooImageUrl(p.odooId, 'product.template', odooUrl);
+
+  // ── Kit builder ──
+  const [showKitBuilder, setShowKitBuilder] = useState(false);
+  const [localKits, setLocalKits] = useState<Product[]>([]);
 
   // ── Productos eliminados localmente (para ocultar sin recargar) ──
   const [deletedIds,  setDeletedIds]  = useState<Set<string>>(new Set());
@@ -1945,7 +2273,8 @@ export default function ProductosPage() {
   // ── Filtros ──
   const filtered = useMemo(() => {
     setPage(1);
-    return products.filter(p => {
+    const allProducts = [...localKits, ...products];
+    return allProducts.filter(p => {
       if (deletedIds.has(p.id)) return false;
       // Ocultos: filtrar siempre salvo que showHidden esté activo
       const isHidden = (p.hidden || hiddenIds.has(p.id)) && !unhiddenIds.has(p.id);
@@ -1980,7 +2309,7 @@ export default function ProductosPage() {
       return matchSearch && matchCat && matchSup && matchSeiq && matchStatus;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, category, supplier, seiqFilter, statusFilter, deletedIds, hiddenIds, unhiddenIds, showHidden, mlLabMap]);
+  }, [search, category, supplier, seiqFilter, statusFilter, deletedIds, hiddenIds, unhiddenIds, showHidden, mlLabMap, localKits]);
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paginated  = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
@@ -2242,6 +2571,16 @@ export default function ProductosPage() {
                 </button>
               </div>
 
+              {/* Crear Kit */}
+              <button
+                onClick={() => setShowKitBuilder(true)}
+                className="flex items-center gap-1.5 px-3 py-2.5 bg-[#FFE600] border border-[#FFE600] text-[#07111F] rounded-xl text-[11px] font-black hover:bg-[#FFD000] transition-colors shrink-0"
+                title="Crear un kit combinando varios productos"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Crear Kit
+              </button>
+
               {/* Sincronizar stock + Mostrar ocultos */}
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
@@ -2415,6 +2754,11 @@ export default function ProductosPage() {
                                     <p className="text-[10px] text-gray-400">
                                       {p.uom}{p.tag && ` · ${p.tag}`}
                                     </p>
+                                    {p.type === 'kit' && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-px rounded text-[8px] font-black bg-[#FFE600] text-[#07111F] leading-none tracking-wide" title="Kit — producto armado">
+                                        <Layers className="w-2 h-2" />KIT
+                                      </span>
+                                    )}
                                     {p.terciarizado && (
                                       <span className="inline-flex items-center px-1.5 py-px rounded text-[8px] font-black bg-[#714B67] text-white leading-none tracking-wide" title="Producto terciarizado — comisión ~10%">
                                         T
@@ -2907,6 +3251,38 @@ export default function ProductosPage() {
               notes:    notes   || undefined,
             });
             setMlAssignTarget(null);
+          }}
+        />
+      )}
+
+      {/* ── Kit Builder Modal ── */}
+      {showKitBuilder && (
+        <KitBuilderModal
+          products={products.filter(p => p.type !== 'kit' && !deletedIds.has(p.id))}
+          odooUrl={odooUrl}
+          allCategories={allCategories}
+          onClose={() => setShowKitBuilder(false)}
+          onCreated={(kit: KitProduct) => {
+            const newProd: Product = {
+              ...kit,
+              sku: null,
+              barcode: null,
+              supPrice: 0,
+              supMinQty: 0,
+              supCode: null,
+              supProductName: null,
+              supPartnerId: null,
+              tag: null,
+              uom: 'unidad',
+              posCategory: null,
+              isPublished: false,
+              isFavorite: false,
+              availablePos: false,
+              markup: kit.markup,
+              seiqCategory: null,
+            };
+            setLocalKits(prev => [newProd, ...prev]);
+            setSelected(newProd);
           }}
         />
       )}

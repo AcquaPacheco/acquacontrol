@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, readFileSync, existsSync, appendFileSync } from 'fs';
-import { resolve } from 'path';
+import { ACTION_LOG_PATH, PARAMS_PATH } from '@/lib/data-paths';
 
-const PARAMS_PATH   = resolve(process.cwd(), 'src/data/params.json');
-const LOG_PATH      = resolve(process.cwd(), 'src/data/action-log.jsonl');
 
 // ── Defaults (espejo exacto de parametros/page.tsx) ──────────────────────────
 const DEFAULT_PARAMS = {
@@ -62,7 +60,7 @@ export function logAction(action: string, section: string, detail?: unknown) {
       section,
       ...(detail !== undefined ? { detail } : {}),
     }) + '\n';
-    appendFileSync(LOG_PATH, entry, 'utf8');
+    appendFileSync(ACTION_LOG_PATH, entry, 'utf8');
   } catch { /* no interrumpir el flujo si el log falla */ }
 }
 

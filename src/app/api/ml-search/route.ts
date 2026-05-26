@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { SETTINGS_PATH } from '@/lib/data-paths';
 
 // ─── Leer credenciales ML desde settings.json (prioridad) o .env (fallback) ──
-const SETTINGS_PATH = resolve(process.cwd(), 'src/data/settings.json');
 
 function readMLCredentials(): { appId: string; appSecret: string; site: string } {
   try {

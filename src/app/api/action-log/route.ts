@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, existsSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { ACTION_LOG_PATH } from '@/lib/data-paths';
 
-const LOG_PATH = resolve(process.cwd(), 'src/data/action-log.jsonl');
 
 export interface LogEntry {
   ts:      string;
@@ -13,8 +12,8 @@ export interface LogEntry {
 
 function readLog(): LogEntry[] {
   try {
-    if (!existsSync(LOG_PATH)) return [];
-    return readFileSync(LOG_PATH, 'utf8')
+    if (!existsSync(ACTION_LOG_PATH)) return [];
+    return readFileSync(ACTION_LOG_PATH, 'utf8')
       .split('\n')
       .filter(Boolean)
       .map(l => JSON.parse(l) as LogEntry)
@@ -38,7 +37,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Falta header X-Confirm: CLEAR_LOG' }, { status: 400 });
   }
   try {
-    writeFileSync(LOG_PATH, '', 'utf8');
+    writeFileSync(ACTION_LOG_PATH, '', 'utf8');
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });

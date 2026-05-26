@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { PRODUCTS_PATH, SETTINGS_PATH } from '@/lib/data-paths';
 
-const SETTINGS_PATH = resolve(process.cwd(), 'src/data/settings.json');
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 
 interface Settings {
   odooServerUrl: string;

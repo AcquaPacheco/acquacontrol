@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { read, utils } from 'xlsx';
 import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { PRODUCTS_PATH } from '@/lib/data-paths';
 
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS

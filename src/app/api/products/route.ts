@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { HISTORY_PATH, PRODUCTS_PATH } from '@/lib/data-paths';
 
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
-const HISTORY_PATH  = resolve(process.cwd(), 'src/data/change-history.json');
 
 interface Product {
   id: string; active: boolean; hidden: boolean;
   cost: number; price: number; stock?: number; barcode?: string;
-  notes?: string; name?: string; [key: string]: unknown;
+  notes?: string; name?: string; type?: string; [key: string]: unknown;
 }
 
 interface HistoryEntry {
@@ -152,6 +150,39 @@ export async function PATCH(req: NextRequest) {
     }
 
     return NextResponse.json({ ok: true, id, updates, history: historyEntries });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/products
+ * Body: full product object (new product / kit)
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json() as Product & { source?: string };
+    const { source = 'manual' } = body;
+    if (!body.id || !body.name) {
+      return NextResponse.json({ ok: false, error: 'Falta id o name' }, { status: 400 });
+    }
+    const products = readProducts();
+    if (products.find(p => p.id === body.id)) {
+      return NextResponse.json({ ok: false, error: `ID "${body.id}" ya existe` }, { status: 409 });
+    }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { source: _s, ...newProduct } = body;
+    products.unshift(newProduct as Product);
+    writeFileSync(PRODUCTS_PATH, JSON.stringify(products, null, 2), 'utf8');
+    appendHistory({
+      productId:   body.id,
+      productName: body.name as string,
+      field:       'created',
+      oldValue:    null,
+      newValue:    body.type ?? 'product',
+      source,
+    });
+    return NextResponse.json({ ok: true, id: body.id });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
   }

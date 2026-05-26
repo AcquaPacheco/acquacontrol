@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import { resolve, dirname } from 'path';
+import { dataPath } from '@/lib/data-paths';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Persistencia de catálogos de proveedores en src/data/catalogs/<slug>.json
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CATALOGS_DIR = resolve(process.cwd(), 'src/data/catalogs');
+const CATALOGS_DIR = dataPath('catalogs');
 
 function safePath(slug: string) {
   // Sanitize slug: only alphanumeric, hyphens, underscores

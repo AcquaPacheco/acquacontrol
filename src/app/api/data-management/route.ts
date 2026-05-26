@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { ODOO_SUPPLIERINFO_PATH, PRODUCTS_PATH, STOCK_PATH, SUPPLIERS_PATH } from '@/lib/data-paths';
 
-const PRODUCTS_PATH  = resolve(process.cwd(), 'src/data/products.json');
-const SUPPLIER_PATH  = resolve(process.cwd(), 'src/data/odoo-supplierinfo.json');
-const CONTACTS_PATH  = resolve(process.cwd(), 'src/data/suppliers.json');
-const STOCK_PATH     = resolve(process.cwd(), 'src/data/stock.json');
 
 function safeRead(path: string): unknown[] {
   try {
@@ -21,8 +17,8 @@ function safeRead(path: string): unknown[] {
 export async function GET() {
   try {
     const products  = safeRead(PRODUCTS_PATH) as { cost: number; price: number; image: string | null; supplierName: string | null }[];
-    const suppliers = safeRead(SUPPLIER_PATH);   // grupos de supplierinfo
-    const contacts  = safeRead(CONTACTS_PATH);   // contactos res.partner
+    const suppliers = safeRead(ODOO_SUPPLIERINFO_PATH);   // grupos de supplierinfo
+    const contacts  = safeRead(SUPPLIERS_PATH);   // contactos res.partner
 
     const stats = {
       products: {
@@ -74,8 +70,8 @@ export async function DELETE(req: NextRequest) {
 
   try {
     writeFileSync(PRODUCTS_PATH, JSON.stringify([], null, 2), 'utf8');
-    writeFileSync(SUPPLIER_PATH, JSON.stringify([], null, 2), 'utf8');
-    writeFileSync(CONTACTS_PATH, JSON.stringify([], null, 2), 'utf8');
+    writeFileSync(ODOO_SUPPLIERINFO_PATH, JSON.stringify([], null, 2), 'utf8');
+    writeFileSync(SUPPLIERS_PATH, JSON.stringify([], null, 2), 'utf8');
     writeFileSync(STOCK_PATH,    JSON.stringify([], null, 2), 'utf8');
     return NextResponse.json({ ok: true, message: 'Base de datos reseteada a cero.' });
   } catch (e) {
@@ -114,7 +110,7 @@ export async function POST(req: NextRequest) {
       if (!Array.isArray(body.suppliers)) {
         return NextResponse.json({ ok: false, error: 'suppliers debe ser un array' }, { status: 400 });
       }
-      writeFileSync(SUPPLIER_PATH, JSON.stringify(body.suppliers, null, 2), 'utf8');
+      writeFileSync(ODOO_SUPPLIERINFO_PATH, JSON.stringify(body.suppliers, null, 2), 'utf8');
     }
 
     return NextResponse.json({

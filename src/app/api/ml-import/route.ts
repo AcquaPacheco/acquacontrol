@@ -12,8 +12,8 @@ import { read, utils } from 'xlsx';
 import { parseOdooRows, parseMLRows, matchAndBuild } from '@/lib/ml-lab-engine';
 import { DEFAULT_ML_PARAMS } from '@/lib/ml-lab-types';
 import type { MLLabProduct } from '@/lib/ml-lab-types';
+import { PRODUCTS_PATH } from '@/lib/data-paths';
 
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 
 interface SystemProduct {
   id: string; sku: string | null; barcode: string | null;

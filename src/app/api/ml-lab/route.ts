@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
 import {
   calcProfitability,
   calcIdealPrice,
@@ -8,9 +7,8 @@ import {
 } from '@/lib/ml-lab-engine';
 import { DEFAULT_ML_PARAMS } from '@/lib/ml-lab-types';
 import type { MLLabProduct, MLLabState, MLProductParams } from '@/lib/ml-lab-types';
+import { ML_LAB_PATH, PRODUCTS_PATH } from '@/lib/data-paths';
 
-const ML_LAB_PATH  = resolve(process.cwd(), 'src/data/ml-lab.json');
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 
 // ─── Tipos internos ──────────────────────────────────────────────────────────
 interface SystemProduct {

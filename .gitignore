@@ -33,6 +33,10 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Data files with secrets — configure via Parámetros UI after first deploy
+src/data/settings.json
+src/data/competitor-links.json
+
 # vercel
 .vercel
 

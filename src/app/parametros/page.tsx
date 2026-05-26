@@ -1784,8 +1784,16 @@ function SeccionOdoo() {
   const [saved,     setSaved]     = useState(false);
   const [testing,   setTesting]   = useState(false);
   const [testOk,    setTestOk]    = useState<boolean | null>(null);
-  const [syncing,   setSyncing]   = useState(false);
-  const [syncResult, setSyncResult] = useState<{ ok: boolean; message?: string; error?: string; withStock?: number; matched?: number; unmatched?: number } | null>(null);
+  const [syncing,       setSyncing]       = useState(false);
+  const [syncResult,    setSyncResult]    = useState<{ ok: boolean; message?: string; error?: string; withStock?: number; matched?: number; unmatched?: number } | null>(null);
+  const [syncingProds,  setSyncingProds]  = useState(false);
+  const [syncProdsResult, setSyncProdsResult] = useState<{
+    ok: boolean; message?: string; error?: string;
+    costChanged?: number; priceChanged?: number; matched?: number; unmatched?: number; unmatchedSample?: string[];
+  } | null>(null);
+  const [syncCost,  setSyncCost]  = useState(true);
+  const [syncPrice, setSyncPrice] = useState(false);
+  const [syncName,  setSyncName]  = useState(false);
 
   useEffect(() => {
     if (!loading) {
@@ -1827,6 +1835,33 @@ function SeccionOdoo() {
       setSyncResult({ ok: false, error: String(e) });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSyncProducts = async () => {
+    setSyncingProds(true);
+    setSyncProdsResult(null);
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          odooServerUrl: url.replace(/\/$/, ''),
+          odooUsername:  username.trim(),
+          odooApiKey:    apiKey.trim(),
+        }),
+      });
+      const res = await fetch('/api/sync-products-odoo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ syncCost, syncPrice, syncName }),
+      });
+      const data = await res.json() as typeof syncProdsResult;
+      setSyncProdsResult(data);
+    } catch (e) {
+      setSyncProdsResult({ ok: false, error: String(e) });
+    } finally {
+      setSyncingProds(false);
     }
   };
 
@@ -1981,6 +2016,99 @@ function SeccionOdoo() {
               </div>
             </div>
           </div>
+
+          {/* ── Sync Productos (costo / precio) desde Odoo ── */}
+          {username && apiKey && (
+            <div className="bg-[#714B67]/5 border border-[#714B67]/20 rounded-xl p-4 space-y-3">
+              <div>
+                <p className="text-[12px] font-black text-[#714B67]">Sincronizar productos desde Odoo</p>
+                <p className="text-[11px] text-[#714B67]/70 mt-0.5">
+                  Trae Precio Costo, Precio de Venta y Nombre directo desde Odoo usando XML-RPC. Coincide por ID de Odoo primero, luego SKU y nombre.
+                </p>
+              </div>
+
+              {/* Checkboxes: qué campos sincronizar */}
+              <div className="flex flex-wrap gap-3">
+                {[
+                  { key: 'syncCost',  label: 'Precio Costo',   val: syncCost,  set: setSyncCost,  desc: 'standard_price de Odoo' },
+                  { key: 'syncPrice', label: 'Precio de Venta', val: syncPrice, set: setSyncPrice, desc: 'list_price de Odoo' },
+                  { key: 'syncName',  label: 'Nombre',          val: syncName,  set: setSyncName,  desc: 'Sobreescribe el nombre local' },
+                ].map(opt => (
+                  <label key={opt.key} className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer transition-colors text-[11px] font-semibold',
+                    opt.val
+                      ? 'bg-[#714B67]/10 border-[#714B67]/40 text-[#714B67]'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300',
+                  )}>
+                    <input
+                      type="checkbox"
+                      checked={opt.val}
+                      onChange={e => opt.set(e.target.checked)}
+                      className="accent-[#714B67] w-3.5 h-3.5"
+                    />
+                    <span>{opt.label}</span>
+                    <span className="text-[9px] font-normal opacity-60">{opt.desc}</span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSyncProducts}
+                  disabled={syncingProds || (!syncCost && !syncPrice && !syncName)}
+                  className={cn(
+                    'flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold whitespace-nowrap transition-all',
+                    syncingProds
+                      ? 'bg-[#714B67]/40 text-white cursor-wait'
+                      : (!syncCost && !syncPrice && !syncName)
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-[#714B67] text-white hover:bg-[#5a3a54]',
+                  )}
+                >
+                  <RefreshCw className={cn('w-3.5 h-3.5', syncingProds && 'animate-spin')} />
+                  {syncingProds ? 'Sincronizando...' : 'Sync Productos'}
+                </button>
+                <p className="text-[10px] text-gray-400">Las fotos no se descargan — se cargan por URL usando el odooId.</p>
+              </div>
+
+              {syncProdsResult && (
+                <div className={cn(
+                  'p-3 rounded-lg text-[12px]',
+                  syncProdsResult.ok
+                    ? 'bg-green-50 border border-green-200 text-green-800'
+                    : 'bg-red-50 border border-red-200 text-red-700',
+                )}>
+                  {syncProdsResult.ok ? (
+                    <div className="space-y-1">
+                      <p className="font-bold">✅ {syncProdsResult.message}</p>
+                      <div className="flex gap-4 flex-wrap text-[11px] text-green-700">
+                        {syncProdsResult.matched !== undefined && (
+                          <span>🔗 {syncProdsResult.matched} coincidencias</span>
+                        )}
+                        {(syncProdsResult.costChanged ?? 0) > 0 && (
+                          <span>💰 {syncProdsResult.costChanged} costos actualizados</span>
+                        )}
+                        {(syncProdsResult.priceChanged ?? 0) > 0 && (
+                          <span>🏷 {syncProdsResult.priceChanged} precios actualizados</span>
+                        )}
+                        {(syncProdsResult.unmatched ?? 0) > 0 && (
+                          <span className="text-amber-600">⚠ {syncProdsResult.unmatched} sin coincidencia</span>
+                        )}
+                      </div>
+                      {syncProdsResult.unmatchedSample && syncProdsResult.unmatchedSample.length > 0 && (
+                        <p className="text-[10px] text-green-600 mt-1">
+                          Sin match: {syncProdsResult.unmatchedSample.slice(0, 4).join(', ')}
+                          {syncProdsResult.unmatchedSample.length > 4 ? '…' : ''}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="font-medium">❌ {syncProdsResult.error}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Botón Sync Stock */}
           {username && apiKey && (

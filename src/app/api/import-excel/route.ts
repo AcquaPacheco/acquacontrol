@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { read, utils } from 'xlsx';
 import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { ODOO_SUPPLIERINFO_PATH, PRODUCTS_PATH, STOCK_PATH, SUPPLIERS_PATH } from '@/lib/data-paths';
 
-const PRODUCTS_PATH  = resolve(process.cwd(), 'src/data/products.json');
-const SUPPLIER_PATH  = resolve(process.cwd(), 'src/data/odoo-supplierinfo.json');
-const CONTACTS_PATH  = resolve(process.cwd(), 'src/data/suppliers.json');
-const STOCK_PATH     = resolve(process.cwd(), 'src/data/stock.json');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIPOS
@@ -714,14 +710,14 @@ export async function POST(req: NextRequest) {
       } else if (result.type === 'supplierinfo') {
         // Reemplaza todo el supplierinfo con los grupos del export
         const groups = result.groups ?? [];
-        writeFileSync(SUPPLIER_PATH, JSON.stringify(groups, null, 2), 'utf8');
+        writeFileSync(ODOO_SUPPLIERINFO_PATH, JSON.stringify(groups, null, 2), 'utf8');
         written.supplierinfo = groups.length;
         written.supplierinfo_products = result.rows.length;
 
         // Auto-generar contactos básicos desde los nombres de proveedor del supplierinfo
         // (evita necesitar un export res.partner separado)
         const existingContacts: Contact[] = (() => {
-          try { return JSON.parse(readFileSync(CONTACTS_PATH, 'utf8')) as Contact[]; } catch { return []; }
+          try { return JSON.parse(readFileSync(SUPPLIERS_PATH, 'utf8')) as Contact[]; } catch { return []; }
         })();
         const existingSlugs = new Set(existingContacts.map(c => c.slug));
         const newContacts = groups
@@ -737,13 +733,13 @@ export async function POST(req: NextRequest) {
           } as Contact));
         if (newContacts.length > 0) {
           const merged = [...existingContacts, ...newContacts].sort((a, b) => a.name.localeCompare(b.name));
-          writeFileSync(CONTACTS_PATH, JSON.stringify(merged, null, 2), 'utf8');
+          writeFileSync(SUPPLIERS_PATH, JSON.stringify(merged, null, 2), 'utf8');
           written.contacts_auto = newContacts.length;
         }
 
       } else if (result.type === 'supplier') {
         // Un proveedor individual: replace o append en odoo-supplierinfo.json
-        const existing: SupplierGroup[] = JSON.parse(readFileSync(SUPPLIER_PATH, 'utf8'));
+        const existing: SupplierGroup[] = JSON.parse(readFileSync(ODOO_SUPPLIERINFO_PATH, 'utf8'));
         const group: SupplierGroup = {
           name:     result.supplierInfo!.name,
           slug:     result.supplierInfo!.slug,
@@ -754,13 +750,13 @@ export async function POST(req: NextRequest) {
         if (idx !== -1) existing[idx] = group;
         else existing.push(group);
         existing.sort((a, b) => b.count - a.count);
-        writeFileSync(SUPPLIER_PATH, JSON.stringify(existing, null, 2), 'utf8');
+        writeFileSync(ODOO_SUPPLIERINFO_PATH, JSON.stringify(existing, null, 2), 'utf8');
         written.supplier = group.count;
 
       } else if (result.type === 'contacts') {
         // Reemplaza suppliers.json con los contactos del export
         const contacts = result.rows as Contact[];
-        writeFileSync(CONTACTS_PATH, JSON.stringify(contacts, null, 2), 'utf8');
+        writeFileSync(SUPPLIERS_PATH, JSON.stringify(contacts, null, 2), 'utf8');
         written.contacts = contacts.length;
 
       } else if (result.type === 'stock') {

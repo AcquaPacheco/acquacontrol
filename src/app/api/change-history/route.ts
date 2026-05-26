@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { HISTORY_PATH } from '@/lib/data-paths';
 
-const HISTORY_PATH = resolve(process.cwd(), 'src/data/change-history.json');
 
 export async function GET() {
   if (!existsSync(HISTORY_PATH)) return NextResponse.json([]);

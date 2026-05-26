@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { PRODUCTS_PATH, SUPPLIERS_PATH } from '@/lib/data-paths';
 
-const SUPPLIERS_PATH = resolve(process.cwd(), 'src/data/suppliers.json');
-const PRODUCTS_PATH  = resolve(process.cwd(), 'src/data/products.json');
 
 interface Supplier { id: string; name: string; active?: boolean; [key: string]: unknown; }
 interface Product  { id: string; supplierName?: string | null; active?: boolean; [key: string]: unknown; }

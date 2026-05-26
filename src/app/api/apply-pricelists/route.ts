@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync } from 'fs';
-import { resolve } from 'path';
+import { ODOO_SUPPLIERINFO_PATH, PRODUCTS_PATH } from '@/lib/data-paths';
 
-const SUPPLIER_PATH = resolve(process.cwd(), 'src/data/odoo-supplierinfo.json');
-const PRODUCTS_PATH = resolve(process.cwd(), 'src/data/products.json');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIPOS
@@ -82,7 +80,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Load current data ─────────────────────────────────────────────────────
-    const suppliers: SupplierGroup[] = JSON.parse(readFileSync(SUPPLIER_PATH, 'utf8'));
+    const suppliers: SupplierGroup[] = JSON.parse(readFileSync(ODOO_SUPPLIERINFO_PATH, 'utf8'));
     const products:  Product[]       = JSON.parse(readFileSync(PRODUCTS_PATH, 'utf8'));
 
     // Build decision map: code → ApplyItem
@@ -153,7 +151,7 @@ export async function POST(req: NextRequest) {
     else suppliers.push(newGroup);
     suppliers.sort((a, b) => b.count - a.count);
 
-    writeFileSync(SUPPLIER_PATH, JSON.stringify(suppliers, null, 2), 'utf8');
+    writeFileSync(ODOO_SUPPLIERINFO_PATH, JSON.stringify(suppliers, null, 2), 'utf8');
 
     return NextResponse.json({
       ok: true,
