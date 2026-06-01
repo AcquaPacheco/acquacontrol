@@ -1,67 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { SETTINGS_PATH } from '@/lib/data-paths';
 
-// ─── Leer credenciales ML desde settings.json (prioridad) o .env (fallback) ──
+// ─── Leer settings ────────────────────────────────────────────────────────────
 
-function readMLCredentials(): { appId: string; appSecret: string; site: string } {
+function readSettings(): Record<string, string | number | null> {
   try {
-    if (existsSync(SETTINGS_PATH)) {
-      const s = JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) as {
-        mlAppId?: string; mlAppSecret?: string; mlSite?: string;
-      };
-      if (s.mlAppId && s.mlAppSecret) {
-        return { appId: s.mlAppId, appSecret: s.mlAppSecret, site: s.mlSite ?? 'MLA' };
-      }
-    }
+    if (existsSync(SETTINGS_PATH))
+      return JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) as Record<string, string | number | null>;
   } catch { /* ignorar */ }
-  return {
-    appId:     process.env.ML_APP_ID     ?? '',
-    appSecret: process.env.ML_APP_SECRET ?? '',
-    site:      process.env.ML_SITE       ?? 'MLA',
-  };
+  return {};
 }
 
-// ─── Token cache (in-memory, se renueva automáticamente) ─────────────────────
-let cachedToken: { token: string; expiresAt: number; site: string } | null = null;
-
-async function getAccessToken(): Promise<{ token: string; site: string } | null> {
-  const { appId, appSecret, site } = readMLCredentials();
-  if (!appId || !appSecret) return null;
-
-  // Token válido todavía (buffer 5 min)
-  if (cachedToken && Date.now() < cachedToken.expiresAt - 300_000) {
-    return { token: cachedToken.token, site: cachedToken.site };
-  }
-
+function saveSettings(updates: Record<string, string | number | null>) {
   try {
-    const res = await fetch('https://api.mercadolibre.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-      body: new URLSearchParams({
-        grant_type:    'client_credentials',
-        client_id:     appId,
-        client_secret: appSecret,
-      }).toString(),
-      cache: 'no-store',
-    });
+    const current = readSettings();
+    writeFileSync(SETTINGS_PATH, JSON.stringify({ ...current, ...updates }, null, 2), 'utf8');
+  } catch { /* ignorar */ }
+}
 
-    if (!res.ok) {
-      console.error('[ml-token] OAuth error:', res.status, await res.text());
-      return null;
+// ─── Token — prioridad: user OAuth > client_credentials ──────────────────────
+async function getAccessToken(): Promise<{ token: string; site: string } | null> {
+  const s    = readSettings();
+  const site = (s.mlSite as string | undefined) ?? process.env.ML_SITE ?? 'MLA';
+
+  // 1. User token (authorization_code flow) — el que ML acepta para catalog search
+  if (s.mlAccessToken) {
+    const expiry = typeof s.mlTokenExpiry === 'number' ? s.mlTokenExpiry : 0;
+
+    // Token válido todavía (buffer 5 min)
+    if (Date.now() < expiry - 300_000) {
+      return { token: s.mlAccessToken as string, site };
     }
 
-    const data = await res.json() as { access_token: string; expires_in: number };
-    cachedToken = {
-      token:     data.access_token,
-      site,
-      expiresAt: Date.now() + data.expires_in * 1000,
-    };
-    return { token: cachedToken.token, site };
-  } catch (e) {
-    console.error('[ml-token] OAuth fetch failed:', e);
-    return null;
+    // Intentar renovar con refresh_token
+    if (s.mlRefreshToken) {
+      const appId     = (s.mlAppId     as string | undefined) ?? process.env.ML_APP_ID     ?? '';
+      const appSecret = (s.mlAppSecret as string | undefined) ?? process.env.ML_APP_SECRET ?? '';
+      try {
+        const res = await fetch('https://api.mercadolibre.com/oauth/token', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+          body:    new URLSearchParams({
+            grant_type:    'refresh_token',
+            client_id:     appId,
+            client_secret: appSecret,
+            refresh_token: s.mlRefreshToken as string,
+          }).toString(),
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const tok = await res.json() as { access_token: string; refresh_token: string; expires_in: number };
+          saveSettings({
+            mlAccessToken:  tok.access_token,
+            mlRefreshToken: tok.refresh_token,
+            mlTokenExpiry:  Date.now() + tok.expires_in * 1000,
+          });
+          return { token: tok.access_token, site };
+        }
+      } catch { /* si falla el refresh, seguir */ }
+    }
   }
+
+  // 2. Sin cuenta conectada → no hay token válido para búsqueda
+  return null;
 }
 
 // ─── GET /api/ml-search?q=... → devuelve token + site para que el browser llame ML directo ──
@@ -75,7 +77,8 @@ export async function GET(req: NextRequest) {
   if (mode === 'token') {
     const auth = await getAccessToken();
     if (!auth) {
-      return NextResponse.json({ ok: false, error: 'credentials' }, { status: 401 });
+      // Sin cuenta conectada — devolvemos site para que el browser intente sin auth
+      return NextResponse.json({ ok: false, error: 'not_connected', site: 'MLA' }, { status: 401 });
     }
     return NextResponse.json({
       ok:    true,
@@ -109,7 +112,6 @@ export async function GET(req: NextRequest) {
     });
 
     if (res.status === 401 || res.status === 403) {
-      cachedToken = null;
       const errBody = await res.text();
       console.error('[ml-search] ML search error', res.status, errBody);
       return NextResponse.json({ ok: false, error: 'credentials' }, { status: 401 });

@@ -204,10 +204,10 @@ function commercialReading(p: Product) {
     body: 'Precio o costo con inconsistencias. Revisá los datos antes de usar en pedido o export.',
     action: 'Corregir inconsistencia de precio/costo.',
   };
-  if (p.margin !== null && p.margin < 35) return {
+  if (p.margin !== null && p.margin < 30) return {
     status: 'Margen crítico',
     bg: 'bg-[#EF4444]/8', textColor: 'text-[#EF4444]', dot: 'bg-[#EF4444]',
-    body: `Margen de ${p.margin}% por debajo del mínimo recomendado (35%). Revisá costo o precio de Lista A.`,
+    body: `Margen de ${p.margin}% por debajo del mínimo recomendado (30%). Revisá costo o precio de Lista A.`,
     action: 'Actualizar costo o subir precio Lista A.',
   };
   if (p.margin !== null && p.margin < 45) return {
@@ -531,12 +531,18 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: p.id, cost: Math.round(newCost * 100) / 100, source: 'vital_sync' }),
       });
-      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number }; error?: string };
       if (data.ok && data.updates) {
         onUpdate?.(p.id, data.updates);
         setSaved('Costo actualizado desde Vital ✓');
         setTimeout(() => setSaved(null), 3000);
+      } else {
+        setSaved(`❌ ${data.error ?? 'No se pudo guardar'}`);
+        setTimeout(() => setSaved(null), 4000);
       }
+    } catch {
+      setSaved('❌ Sin conexión con el servidor');
+      setTimeout(() => setSaved(null), 4000);
     } finally {
       setSaving(false);
     }
@@ -593,15 +599,21 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: p.id, cost: val, price: newPriceIfMaintain, source: 'manual' }),
           });
-          const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+          const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number }; error?: string };
           if (data.ok && data.updates) {
             onUpdate?.(p.id, data.updates);
             setSaved(`Precio actualizado a ${formatARS(newPriceIfMaintain)} — markup ${mk}% mantenido ✓`);
             setTimeout(() => setSaved(null), 3500);
+            cancelEdit();
+          } else {
+            setSaved(`❌ ${data.error ?? 'No se pudo guardar'}`);
+            setTimeout(() => setSaved(null), 4000);
           }
+        } catch {
+          setSaved('❌ Sin conexión con el servidor');
+          setTimeout(() => setSaved(null), 4000);
         } finally {
           setSaving(false);
-          cancelEdit();
         }
         return;
       } else {
@@ -612,16 +624,22 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: p.id, cost: val, source: 'manual' }),
           });
-          const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+          const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number }; error?: string };
           if (data.ok && data.updates) {
             onUpdate?.(p.id, data.updates);
             const improvement = Math.round(((p.price - val) / p.price) * 1000) / 10;
             setSaved(`📉 Costo bajó — precio ${formatARS(p.price)} mantenido — margen mejoró a ${improvement}% ✓`);
             setTimeout(() => setSaved(null), 4000);
+            cancelEdit();
+          } else {
+            setSaved(`❌ ${data.error ?? 'No se pudo guardar'}`);
+            setTimeout(() => setSaved(null), 4000);
           }
+        } catch {
+          setSaved('❌ Sin conexión con el servidor');
+          setTimeout(() => setSaved(null), 4000);
         } finally {
           setSaving(false);
-          cancelEdit();
         }
         return;
       }
@@ -636,15 +654,21 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number }; error?: string };
       if (data.ok && data.updates) {
         onUpdate?.(p.id, data.updates);
         setSaved(field === 'cost' ? 'Costo guardado ✓' : 'Precio guardado ✓');
         setTimeout(() => setSaved(null), 2200);
+        cancelEdit();
+      } else {
+        setSaved(`❌ ${data.error ?? 'No se pudo guardar'}`);
+        setTimeout(() => setSaved(null), 4000);
       }
+    } catch {
+      setSaved('❌ Sin conexión con el servidor');
+      setTimeout(() => setSaved(null), 4000);
     } finally {
       setSaving(false);
-      cancelEdit();
     }
   };
 
@@ -659,17 +683,23 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+      const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number }; error?: string };
       if (data.ok && data.updates) {
         onUpdate?.(p.id, data.updates);
         setSaved(choice === 'maintain-markup'
           ? `Precio bajado a ${formatARS(newPriceIfMaintain)} — markup ${currentMarkup}% mantenido ✓`
           : `Costo bajado, precio ${formatARS(currentPrice)} mantenido — utilidad mejorada ✓`);
         setTimeout(() => setSaved(null), 3500);
+        setCostChangePrompt(null);
+      } else {
+        setSaved(`❌ ${data.error ?? 'No se pudo guardar'}`);
+        setTimeout(() => setSaved(null), 4000);
       }
+    } catch {
+      setSaved('❌ Sin conexión con el servidor');
+      setTimeout(() => setSaved(null), 4000);
     } finally {
       setSaving(false);
-      setCostChangePrompt(null);
     }
   };
 
@@ -976,7 +1006,10 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
               Lista A · precio exportable
             </p>
             {saved && (
-              <span className="text-[10px] font-semibold text-[#16A34A] animate-pulse">{saved}</span>
+              <span className={cn(
+                'text-[10px] font-semibold animate-pulse',
+                saved.startsWith('❌') ? 'text-red-600' : 'text-[#16A34A]'
+              )}>{saved}</span>
             )}
           </div>
 
@@ -1021,7 +1054,29 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
                   )}
                 </button>
               )}
-              <div className="text-[10px] text-gray-400 mt-1">list_price · IVA incluido · click para editar</div>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[10px] text-gray-400">list_price · IVA incluido · click para editar</span>
+                {p.price > 1000 && p.price % 100 !== 0 && !editingPrice && (
+                  <button
+                    onClick={async () => {
+                      const rounded = Math.round(p.price / 100) * 100;
+                      setSaving(true);
+                      try {
+                        const res = await fetch('/api/products', {
+                          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ id: p.id, price: rounded, source: 'manual' }),
+                        });
+                        const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+                        if (data.ok && data.updates) onUpdate?.(p.id, data.updates);
+                      } finally { setSaving(false); }
+                    }}
+                    className="text-[9px] text-amber-500 hover:text-amber-700 font-bold underline whitespace-nowrap"
+                    title="Redondear al múltiplo de $100 más cercano"
+                  >
+                    ↺ Redondear a {formatARS(Math.round(p.price / 100) * 100)}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Margen pill */}
@@ -1222,6 +1277,104 @@ function ProductInspector({ product: p, onClose, odooUrl = '', onToggleActive, o
             </p>
           </div>
         </div>
+
+        {/* ── 4b. Precio sugerido para mejorar margen ── */}
+        {p.cost > 0 && (() => {
+          const targets = p.terciarizado
+            ? [{ label: 'Mínimo (5%)',   pct: 5,  cls: 'border-red-200 bg-red-50',       txt: 'text-red-600' },
+               { label: 'Objetivo (8%)', pct: 8,  cls: 'border-orange-200 bg-orange-50', txt: 'text-orange-600' },
+               { label: 'Ideal (12%)',   pct: 12, cls: 'border-green-200 bg-green-50',   txt: 'text-green-700' }]
+            : [{ label: 'Mínimo (30%)',   pct: 30, cls: 'border-red-200 bg-red-50',       txt: 'text-red-600' },
+               { label: 'Objetivo (47%)', pct: 47, cls: 'border-blue-200 bg-blue-50',     txt: 'text-blue-700' },
+               { label: 'Premium (55%)',  pct: 55, cls: 'border-green-200 bg-green-50',   txt: 'text-green-700' }];
+
+          // Redondear a 100 para precios ≥$1000 (precios redondos, más comerciales)
+          const suggestedPrice = (targetPct: number) => {
+            const raw  = p.cost / (1 - targetPct / 100);
+            const step = raw >= 1000 ? 100 : 10;
+            return Math.round(raw / step) * step;
+          };
+
+          const currentMargin = p.margin ?? 0;
+          const idealTarget   = p.terciarizado ? 8 : 47;
+          const isBelowIdeal  = currentMargin < idealTarget;
+
+          return (
+            <div className="px-4 py-3 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-bold tracking-widest text-gray-400 uppercase">
+                  Precio sugerido
+                </p>
+                <span className="text-[9px] text-gray-400">
+                  Actual: {formatARS(p.price)} · {currentMargin}%
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {targets.map(t => {
+                  const sp = suggestedPrice(t.pct);
+                  const isCurrentTarget = currentMargin >= t.pct - 1 && currentMargin < t.pct + 5;
+                  const alreadyAchieved = currentMargin >= t.pct;
+                  return (
+                    <div
+                      key={t.pct}
+                      className={cn(
+                        'flex items-center justify-between rounded-xl px-3 py-2 border transition-all',
+                        alreadyAchieved ? 'border-gray-100 bg-gray-50 opacity-50' : t.cls,
+                        isCurrentTarget && !alreadyAchieved && 'ring-1 ring-blue-300',
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        {alreadyAchieved
+                          ? <span className="text-[9px] text-gray-400">✓ {t.label}</span>
+                          : <span className={cn('text-[10px] font-bold', t.txt)}>{t.label}</span>}
+                        {!alreadyAchieved && isBelowIdeal && t.pct === idealTarget && (
+                          <span className="text-[8px] font-black bg-blue-600 text-white px-1.5 py-px rounded-full">OBJETIVO</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={cn(
+                          'text-[13px] font-black tabular-nums',
+                          alreadyAchieved ? 'text-gray-400' : t.txt,
+                        )}>
+                          {formatARS(sp)}
+                        </span>
+                        {!alreadyAchieved && (
+                          <button
+                            onClick={async () => {
+                              setSaving(true);
+                              try {
+                                const res = await fetch('/api/products', {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ id: p.id, price: sp, source: 'manual' }),
+                                });
+                                const data = await res.json() as { ok: boolean; updates?: { cost?: number; price?: number; margin?: number; markup?: number } };
+                                if (data.ok && data.updates) {
+                                  onUpdate?.(p.id, data.updates);
+                                  setSaved(`Precio actualizado a ${formatARS(sp)} · margen ${t.pct}% ✓`);
+                                  setTimeout(() => setSaved(null), 3000);
+                                }
+                              } finally { setSaving(false); }
+                            }}
+                            disabled={saving}
+                            className={cn(
+                              'px-2 py-1 rounded-lg text-[10px] font-black border transition-all disabled:opacity-50',
+                              t.pct === idealTarget
+                                ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
+                                : 'bg-white border-gray-200 text-gray-700 hover:border-gray-400',
+                            )}
+                          >
+                            Aplicar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ── 4b. Tipo de producto ── */}
         <div className="px-4 py-3">
@@ -2082,9 +2235,10 @@ export default function ProductosPage() {
   const [showHidden,  setShowHidden]  = useState(false);
   // ── Sync stock ──
   const stockInputRef = useRef<HTMLInputElement>(null);
-  const [syncingStock, setSyncingStock] = useState(false);
-  const [syncToast,    setSyncToast]    = useState<string | null>(null);
-  const [syncResult,   setSyncResult]   = useState<{ matched: number; unmatched: number; unmatchedNames: string[] } | null>(null);
+  const [syncingStock,  setSyncingStock]  = useState(false);
+  const [syncingPrices, setSyncingPrices] = useState(false);
+  const [syncToast,     setSyncToast]     = useState<string | null>(null);
+  const [syncResult,    setSyncResult]    = useState<{ matched: number; unmatched: number; unmatchedNames: string[] } | null>(null);
 
   // ── Estado local de activos (para actualizar sin recargar la página) ──
   const [activeMap, setActiveMap] = useState<Record<string, boolean>>({});
@@ -2097,11 +2251,19 @@ export default function ProductosPage() {
   const handleToggleActive = (id: string, active: boolean) => {
     setActiveMap(prev => ({ ...prev, [id]: active }));
     setSelected(prev => prev && prev.id === id ? { ...prev, active } : prev);
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, active } : p));
   };
 
   // ── Actualizar costo/precio desde el inspector ──
   const handleProductUpdate = (id: string, updates: { cost?: number; price?: number; margin?: number; markup?: number; supplierName?: string; terciarizado?: boolean }) => {
+    // Update inspector panel
     setSelected(prev => prev && prev.id === id ? { ...prev, ...updates } : prev);
+    // Update main products array → insights, stats and list recalculate immediately
+    setProducts(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      const updated = { ...p, ...updates };
+      return { ...updated, status: derivedStatus(updated) };
+    }));
   };
 
   // ── Eliminar producto: ocultar inmediatamente en el cliente ──
@@ -2190,6 +2352,26 @@ export default function ProductosPage() {
       setSyncToast(`❌ Error: ${String(e)}`);
     } finally {
       setSyncingStock(false);
+    }
+  };
+
+  // ── Sincronizar precios y costos desde Odoo ──
+  const handleSyncPrices = async () => {
+    setSyncingPrices(true);
+    setSyncToast(null);
+    try {
+      const res = await fetch('/api/sync-prices-odoo', { method: 'POST' });
+      const data = await res.json() as { ok: boolean; message?: string; error?: string; updated?: number; skipped?: number };
+      if (data.ok) {
+        setSyncToast(`✓ ${data.message ?? `${data.updated ?? 0} productos actualizados — Recargando…`}`);
+        setTimeout(() => window.location.reload(), 2000);
+      } else {
+        setSyncToast(`❌ ${data.error ?? 'Error al sincronizar precios'}`);
+      }
+    } catch (e) {
+      setSyncToast(`❌ Error: ${String(e)}`);
+    } finally {
+      setSyncingPrices(false);
     }
   };
 
@@ -2597,6 +2779,21 @@ export default function ProductosPage() {
                   {syncingStock
                     ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sincronizando…</>
                     : <><RefreshCw className="w-3.5 h-3.5" /> Sync stock</>}
+                </button>
+                <button
+                  onClick={handleSyncPrices}
+                  disabled={syncingPrices}
+                  title="Sincronizar costos y precios desde Odoo (standard_price y list_price)"
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2.5 bg-white border rounded-xl text-[11px] font-semibold transition-colors',
+                    syncingPrices
+                      ? 'opacity-60 cursor-not-allowed border-gray-200'
+                      : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400',
+                  )}
+                >
+                  {syncingPrices
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sincronizando…</>
+                    : <><RefreshCw className="w-3.5 h-3.5" /> Sync precios</>}
                 </button>
                 <button
                   onClick={() => setShowHidden(v => !v)}

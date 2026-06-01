@@ -38,6 +38,7 @@ interface MedioPago {
   medio: string;
   lista: string;
   recargo: number;
+  comision: number;   // % que cobra el procesador al comercio (Nave / MercadoPago)
   activo: boolean;
 }
 
@@ -77,15 +78,17 @@ const DEFAULT_IMPUESTOS: ImpuestosParams = {
 };
 
 const DEFAULT_PAGOS: MedioPago[] = [
-  { id: 'credito_1c',    medio: 'Crédito — 1 cuota',            lista: 'A', recargo: 0,    activo: true },
-  { id: 'credito_3c',    medio: 'Crédito — 3 cuotas',           lista: 'A', recargo: 8.0,  activo: true },
-  { id: 'credito_6c',    medio: 'Crédito — 6 cuotas',           lista: 'A', recargo: 15.0, activo: true },
-  { id: 'credito_12c',   medio: 'Crédito — 12 cuotas',          lista: 'A', recargo: 30.0, activo: true },
-  { id: 'debito',        medio: 'Débito (Nave / Mercado Pago)',  lista: 'B', recargo: 0,    activo: true },
-  { id: 'transferencia', medio: 'Transferencia bancaria',        lista: 'B', recargo: 0,    activo: true },
-  { id: 'qr_nave',       medio: 'QR Nave / Dinero en cuenta',   lista: 'B', recargo: 0,    activo: true },
-  { id: 'mp_link',       medio: 'MercadoPago Link de pago',     lista: 'B', recargo: 0,    activo: true },
-  { id: 'efectivo',      medio: 'Efectivo',                     lista: 'C', recargo: 0,    activo: true },
+  // recargo = lo que se suma al precio del cliente (%)
+  // comision = lo que cobra el procesador al comercio (Nave / MercadoPago), promedio de ambos terminales
+  { id: 'credito_1c',    medio: 'Crédito — 1 cuota',            lista: 'A', recargo: 0,    comision: 6.0, activo: true },
+  { id: 'credito_3c',    medio: 'Crédito — 3 cuotas',           lista: 'A', recargo: 8.0,  comision: 6.0, activo: true },
+  { id: 'credito_6c',    medio: 'Crédito — 6 cuotas',           lista: 'A', recargo: 15.0, comision: 6.0, activo: true },
+  { id: 'credito_12c',   medio: 'Crédito — 12 cuotas',          lista: 'A', recargo: 30.0, comision: 6.0, activo: true },
+  { id: 'debito',        medio: 'Débito (Nave / Mercado Pago)',  lista: 'B', recargo: 0,    comision: 2.5, activo: true },
+  { id: 'transferencia', medio: 'Transferencia bancaria',        lista: 'B', recargo: 0,    comision: 0.0, activo: true },
+  { id: 'qr_nave',       medio: 'QR Nave / Dinero en cuenta',   lista: 'B', recargo: 0,    comision: 1.0, activo: true },
+  { id: 'mp_link',       medio: 'MercadoPago Link de pago',     lista: 'B', recargo: 0,    comision: 6.6, activo: true },
+  { id: 'efectivo',      medio: 'Efectivo',                     lista: 'C', recargo: 0,    comision: 0.0, activo: true },
 ];
 
 const DEFAULT_LISTAS: ListaPrecio[] = [
@@ -441,7 +444,17 @@ function SeccionPagos() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    loadParams().then(all => { if (all.pagos) setData(all.pagos as MedioPago[]); });
+    loadParams().then(all => {
+      if (all.pagos) {
+        // Migrate: fill in comision from defaults when not present in stored data
+        const stored = all.pagos as MedioPago[];
+        const migrated = stored.map(p => ({
+          ...p,
+          comision: p.comision ?? DEFAULT_PAGOS.find(d => d.id === p.id)?.comision ?? 0,
+        }));
+        setData(migrated);
+      }
+    });
   }, []);
 
   const handleSave = async () => {
@@ -478,6 +491,7 @@ function SeccionPagos() {
               <th className="text-left pb-2">Medio de pago</th>
               <th className="text-center pb-2 w-32">Lista base</th>
               <th className="text-center pb-2 w-36">Recargo %</th>
+              <th className="text-center pb-2 w-36">Comisión %</th>
               <th className="text-center pb-2 w-36">Precio efectivo</th>
             </tr>
           </thead>
@@ -524,6 +538,29 @@ function SeccionPagos() {
                   </div>
                 </td>
                 <td className="py-2.5 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <input
+                      type="number"
+                      value={p.comision ?? 0}
+                      min={0}
+                      max={30}
+                      step={0.1}
+                      onChange={e => update(p.id, 'comision', parseFloat(e.target.value) || 0)}
+                      className={cn(
+                        'w-20 text-center text-[13px] font-mono border rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-300',
+                        (p.comision ?? 0) === 0
+                          ? 'border-gray-200 text-gray-400 bg-white'
+                          : (p.comision ?? 0) < 2
+                          ? 'border-green-200 text-green-700 bg-green-50'
+                          : (p.comision ?? 0) < 5
+                          ? 'border-orange-200 text-orange-700 bg-orange-50'
+                          : 'border-red-200 text-red-700 bg-red-50',
+                      )}
+                    />
+                    <span className="text-[11px] text-gray-400">%</span>
+                  </div>
+                </td>
+                <td className="py-2.5 text-center">
                   <span className={cn(
                     'text-[12px] font-semibold px-2 py-0.5 rounded',
                     p.recargo === 0 ? 'text-success bg-success/10'
@@ -539,17 +576,23 @@ function SeccionPagos() {
         </table>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 bg-acqua/5 border border-acqua/20 rounded-lg">
           <p className="text-[11px] text-gray-600">
-            <strong className="text-acqua">Cómo funciona:</strong> El precio final = Lista base × (1 + recargo%).
+            <strong className="text-acqua">Recargo %:</strong> Lo que se suma al precio del cliente.
             B y C ya son descuentos de A — el recargo adicional es 0 por defecto.
+          </p>
+        </div>
+        <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg">
+          <p className="text-[11px] text-gray-600">
+            <strong className="text-orange-700">Comisión %:</strong> Lo que te cobra el procesador a vos (Nave o MercadoPago). Se descuenta del margen real.
+            Verde &lt;2% · Naranja 2-5% · Rojo &gt;5%.
           </p>
         </div>
         <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
           <p className="text-[11px] text-gray-600">
-            <strong>Crédito en cuotas:</strong> Los recargos financieros se trasladan al precio visible del cliente sobre Lista A.
-            1 cuota = sin recargo (precio A puro).
+            <strong>Cuotas con interés:</strong> El cliente paga el interés → comisión baja.
+            Cuotas sin interés: vos absorbés la diferencia financiera → comisión más alta.
           </p>
         </div>
       </div>

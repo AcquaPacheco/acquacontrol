@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * ML Search — el browser hace el request directo a ML (evita bloqueo server-side).
- * El servidor solo provee el token via /api/ml-search?mode=token
+ * ML Search — usa user token (OAuth) si la cuenta está conectada; sin auth si no.
+ * client_credentials tokens NO funcionan para catalog search.
+ * Con cuenta conectada: el server provee el user token vía /api/ml-search?mode=token.
  */
 
 export interface MLSearchItem {
@@ -46,31 +47,36 @@ export async function mlSearch(
   limit  = 8,
   exclude = '',
 ): Promise<MLSearchResult | MLSearchError> {
-  // 1. Pedir token al servidor
-  let token = '';
-  let site  = 'MLA';
+  // 1. Intentar obtener user token (requiere cuenta ML conectada en Parámetros)
+  let userToken = '';
+  let site      = 'MLA';
   try {
     const tr = await fetch(`/api/ml-search?mode=token&q=${encodeURIComponent(query)}&limit=${limit}`);
     const td = await tr.json() as { ok: boolean; token?: string; site?: string; error?: string };
-    if (!td.ok) return { ok: false, error: td.error ?? 'credentials' };
-    token = td.token ?? '';
-    site  = td.site  ?? 'MLA';
-  } catch (e) {
-    return { ok: false, error: String(e) };
-  }
+    if (td.ok && td.token) {
+      userToken = td.token;
+      site      = td.site ?? 'MLA';
+    } else {
+      site = td.site ?? 'MLA'; // siempre tomamos el site aunque no haya token
+    }
+  } catch { /* si falla el server, igual intentamos sin token */ }
 
-  if (!token) return { ok: false, error: 'credentials' };
-
-  // 2. Llamar ML directo desde el browser
+  // 2. Llamar ML desde el browser (con user token si hay, sin auth si no)
   const q = query.replace(/[""'']/g, '').replace(/[^\w\sáéíóúüñÁÉÍÓÚÜÑ-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (userToken) headers['Authorization'] = `Bearer ${userToken}`;
+
   try {
     const res = await fetch(
       `https://api.mercadolibre.com/sites/${site}/search?q=${encodeURIComponent(q)}&limit=${Math.min(limit, 20)}&sort=relevance`,
-      { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` } },
+      { headers },
     );
 
     if (!res.ok) {
-      return { ok: false, error: `ML ${res.status}` };
+      const msg = res.status === 403
+        ? 'MercadoLibre bloqueó la consulta. Intentá de nuevo en unos segundos.'
+        : `Error ML ${res.status}`;
+      return { ok: false, error: msg };
     }
 
     const data = await res.json() as {

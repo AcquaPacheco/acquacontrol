@@ -2,10 +2,10 @@
  * Shared Gemini REST helper — no extra dependencies.
  *
  * Uses the v1beta endpoint with SSE streaming.
- * Model: gemini-2.5-flash (stable, as of 2025-05).
+ * Model: gemini-1.5-flash (stable, widely available via Google AI Studio keys).
  */
 
-export const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_MODEL = 'gemini-1.5-flash';
 
 export interface GeminiPart    { text: string }
 export interface GeminiContent { role: 'user' | 'model'; parts: GeminiPart[] }

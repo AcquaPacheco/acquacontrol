@@ -1800,6 +1800,760 @@ function GlobalParamsPanel({ params, onChange }: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ML SYNC — tipos, comisiones y componentes de publicaciones
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MLPublication {
+  id: string;
+  title: string;
+  price: number;
+  base_price: number;
+  condition: string;
+  status: string;
+  available_quantity: number;
+  sold_quantity: number;
+  thumbnail: string;
+  pictures: Array<{ url: string; secure_url?: string }>;
+  listing_type_id: string;
+  permalink: string;
+  shipping: { free_shipping: boolean; logistic_type?: string };
+  seller_custom_field?: string;
+  health?: number;
+  catalog_listing?: boolean;
+  date_created?: string;
+  last_updated?: string;
+}
+
+interface MLAuthStatus {
+  connected: boolean;
+  expired?: boolean;
+  userId?: number;
+  nickname?: string;
+}
+
+// Resultados de búsqueda de competidores en ML
+interface ScoutResult {
+  id: string; title: string; price: number; condition: string;
+  permalink: string; thumbnail: string | null; freeShipping: boolean;
+  soldQty: number; seller: string | null;
+  installments?: { quantity: number; amount: number; rate: number } | null;
+}
+
+// Comisiones ML Argentina (aprox.)
+const ML_COMMISSION_RATE: Record<string, number> = {
+  gold_special: 0.16,
+  gold_pro:     0.12,
+  gold:         0.09,
+  silver:       0.06,
+  bronze:       0.05,
+  free:         0,
+};
+const ML_TYPE_LABEL: Record<string, string> = {
+  gold_special: 'Premium',
+  gold_pro:     'Premium+',
+  gold:         'Gold',
+  silver:       'Silver',
+  bronze:       'Gratis+',
+  free:         'Gratis',
+};
+
+// Costo adicional para el vendedor por absorber cuotas sin interés
+const ML_CUOTAS_COST: Record<number, number> = {
+  0: 0, 3: 0.084, 6: 0.123, 9: 0.157, 12: 0.192,
+};
+
+function calcMLNet(
+  price: number, listingType: string, freeShipping: boolean, logistic?: string, cuotas = 0,
+) {
+  const rate       = ML_COMMISSION_RATE[listingType] ?? 0.12;
+  const comm       = price * rate;
+  const ivaComm    = comm * 0.21;
+  const shipping   = freeShipping ? (logistic === 'fulfillment' ? 1200 : 600) : 0;
+  const cuotasCost = price * (ML_CUOTAS_COST[cuotas] ?? 0);
+  const net        = price - comm - ivaComm - shipping - cuotasCost;
+  return { rate, comm, ivaComm, shipping, cuotasCost, net };
+}
+
+function findMatchedProduct(pub: MLPublication) {
+  const sku = (pub.seller_custom_field ?? '').trim().toLowerCase();
+  return systemProducts.find(p =>
+    (sku && (p.sku ?? '').toLowerCase() === sku) ||
+    pub.title.toLowerCase().includes((p.name ?? '').toLowerCase().slice(0, 22))
+  ) ?? null;
+}
+
+// ─── Simulación ML ────────────────────────────────────────────────────────────
+
+function MLSimulacion({ pub, onClose }: { pub: MLPublication; onClose: () => void }) {
+  const [photoIdx,    setPhotoIdx]    = useState(0);
+  const [scouts,      setScouts]      = useState<ScoutResult[]>([]);
+  const [scouting,    setScouting]    = useState(false);
+  const [scoutTotal,  setScoutTotal]  = useState(0);
+  const [simPrice,    setSimPrice]    = useState(pub.price);
+  const [simCuotas,   setSimCuotas]   = useState(0);
+
+  const photos = pub.pictures?.length
+    ? pub.pictures.map(p => (p.secure_url ?? p.url).replace('-I.jpg', '-O.jpg'))
+    : [pub.thumbnail];
+
+  const matched = useMemo(() => findMatchedProduct(pub), [pub]);
+  const cost = matched?.cost ?? 0;
+
+  // Real calcs (current price, no cuotas displayed)
+  const realCalc = calcMLNet(pub.price, pub.listing_type_id, pub.shipping?.free_shipping, pub.shipping?.logistic_type);
+  // Simulator calcs (user-adjusted price + cuotas)
+  const simCalc  = useMemo(
+    () => calcMLNet(simPrice, pub.listing_type_id, pub.shipping?.free_shipping, pub.shipping?.logistic_type, simCuotas),
+    [simPrice, simCuotas, pub],
+  );
+
+  const realUtilidad = cost > 0 ? realCalc.net - cost : null;
+  const realMargin   = realUtilidad !== null ? (realUtilidad / pub.price) * 100 : null;
+  const simUtilidad  = cost > 0 ? simCalc.net - cost : null;
+  const simMargin    = simUtilidad !== null && simPrice > 0 ? (simUtilidad / simPrice) * 100 : null;
+
+  const mgColor = (m: number | null) =>
+    m === null ? 'text-gray-400' : m >= 25 ? 'text-[#16A34A]' : m >= 0 ? 'text-[#D97706]' : 'text-[#DC2626]';
+
+  const fmtARS = (n: number) => Math.round(n).toLocaleString('es-AR');
+
+  // Auto-fetch competitors — browser-side call to bypass ML's server-side blocking
+  useEffect(() => {
+    if (!pub.title) return;
+    setScouting(true);
+    setScouts([]);
+    setScoutTotal(0);
+
+    const q = pub.title.replace(/[()[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+
+    // Step 1: Get OAuth token from our server (client_credentials, no user login needed)
+    fetch(`/api/ml-search?mode=token&q=${encodeURIComponent(q)}&limit=10`)
+      .then(r => r.json())
+      .then(async (d: { ok: boolean; token?: string; site?: string }) => {
+        if (!d.ok || !d.token) return;
+
+        // Step 2: Search ML directly from the browser (avoids server-side IP blocking)
+        const mlRes = await fetch(
+          `https://api.mercadolibre.com/sites/${d.site ?? 'MLA'}/search` +
+          `?q=${encodeURIComponent(q)}&limit=10&sort=relevance`,
+          { headers: { Authorization: `Bearer ${d.token}` } },
+        );
+        if (!mlRes.ok) return;
+
+        const mlData = await mlRes.json() as {
+          results: Array<{
+            id: string; title: string; price: number; condition: string;
+            permalink: string; thumbnail: string; sold_quantity: number;
+            shipping: { free_shipping: boolean; logistic_type?: string };
+            installments?: { quantity: number; amount: number; rate: number } | null;
+            seller?: { nickname: string };
+          }>;
+          paging: { total: number };
+        };
+
+        const EXCL = ['apacheco', 'acquapacheco'];
+        const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const items: ScoutResult[] = (mlData.results ?? [])
+          .filter(r => !EXCL.some(ex => norm(r.seller?.nickname ?? '').includes(norm(ex))))
+          .slice(0, 8)
+          .map(r => ({
+            id: r.id, title: r.title, price: r.price, condition: r.condition,
+            permalink: r.permalink,
+            thumbnail: (r.thumbnail ?? '').replace('http:', 'https:').replace('-I.jpg', '-O.jpg').replace('-I.webp', '-O.webp'),
+            freeShipping: r.shipping?.free_shipping ?? false,
+            soldQty: r.sold_quantity ?? 0,
+            seller: r.seller?.nickname ?? null,
+            installments: r.installments ?? null,
+          }))
+          .sort((a, b) => b.soldQty - a.soldQty); // Best sellers first
+
+        setScouts(items);
+        setScoutTotal(mlData.paging?.total ?? 0);
+      })
+      .catch(() => {})
+      .finally(() => setScouting(false));
+  }, [pub.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape key
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  // Competitor stats
+  const avgCompPrice = scouts.length > 0 ? scouts.reduce((s, c) => s + c.price, 0) / scouts.length : 0;
+  const minCompPrice = scouts.length > 0 ? Math.min(...scouts.map(c => c.price)) : 0;
+  const maxCompPrice = scouts.length > 0 ? Math.max(...scouts.map(c => c.price)) : 0;
+  const priceDiff    = avgCompPrice > 0 ? ((simPrice - avgCompPrice) / avgCompPrice) * 100 : null;
+
+  const { rate, comm, ivaComm, shipping, net } = realCalc;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 lg:p-4"
+      style={{ background: 'rgba(7,17,31,0.72)', backdropFilter: 'blur(6px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
+
+        {/* ML yellow header */}
+        <div className="bg-[#FFE600] px-5 py-2.5 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="font-black text-[#07111F] text-[16px] tracking-tight">mercadolibre</span>
+            <span className="bg-[#3483FA] text-white text-[10px] font-black px-2 py-0.5 rounded-md">SIMULACIÓN</span>
+            <span className="text-[11px] text-[#07111F]/40 font-mono">{pub.id}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <a href={pub.permalink} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 text-[11px] font-semibold text-[#07111F]/60 hover:text-[#07111F] transition-colors">
+              <ExternalLink className="w-3.5 h-3.5" /> Ver en ML
+            </a>
+            <button onClick={onClose} className="p-1.5 rounded-full hover:bg-[#07111F]/10 transition-colors">
+              <X className="w-4 h-4 text-[#07111F]" />
+            </button>
+          </div>
+        </div>
+
+        {/* Two-panel body */}
+        <div className="flex-1 overflow-hidden flex">
+
+          {/* ── LEFT: ML listing preview ─────────────────────────────────── */}
+          <div className="flex-1 overflow-y-auto p-5 border-r border-gray-100">
+            <p className="text-[11px] text-[#3483FA] mb-3">
+              Acqua Pacheco &rsaquo; <span className="text-gray-400">{pub.title.split(' ').slice(0, 3).join(' ')}…</span>
+            </p>
+
+            {/* Photos */}
+            <div className="flex gap-3 mb-4">
+              <div className="flex flex-col gap-1.5 shrink-0">
+                {photos.slice(0, 6).map((url, i) => (
+                  <button key={i} onClick={() => setPhotoIdx(i)}
+                    className={cn('w-10 h-10 rounded border-2 overflow-hidden bg-gray-50 transition-colors',
+                      photoIdx === i ? 'border-[#3483FA]' : 'border-gray-200 hover:border-gray-400')}>
+                    <img src={url} alt="" className="w-full h-full object-contain p-0.5" />
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 bg-gray-50 rounded-xl overflow-hidden flex items-center justify-center" style={{ minHeight: 220 }}>
+                <img src={photos[photoIdx]} alt={pub.title} className="max-w-full object-contain" style={{ maxHeight: 240 }} />
+              </div>
+            </div>
+
+            {/* Meta */}
+            <div className="flex items-center gap-2 mb-1 text-[11px] text-gray-500">
+              <span>{pub.condition === 'new' ? 'Nuevo' : 'Usado'}</span>
+              {pub.sold_quantity > 0 && <><span>·</span><span>{pub.sold_quantity} vendidos</span></>}
+              {pub.catalog_listing && (
+                <span className="bg-blue-50 border border-blue-200 text-blue-700 font-semibold px-1.5 py-0.5 rounded text-[9px]">CATÁLOGO</span>
+              )}
+            </div>
+            <h2 className="text-[16px] font-medium text-[#07111F] leading-snug mb-3">{pub.title}</h2>
+
+            {/* Price */}
+            <div className="text-[26px] font-light text-[#07111F] mb-0.5">${fmtARS(pub.price)}</div>
+            <div className="text-[12px] text-[#00a650] font-semibold mb-3">
+              en 12x ${fmtARS(Math.round(pub.price * 1.15 / 12))} sin interés
+            </div>
+
+            {/* ★ Recibís box — ML Seller Center style */}
+            <div className="rounded-xl border border-[#00a650]/40 bg-[#F0FFF6] p-4 mb-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[11px] font-bold text-[#00a650] uppercase tracking-wide">Recibís por esta venta</span>
+                <span className="text-[10px] bg-[#00a650] text-white px-1.5 py-0.5 rounded font-bold">
+                  {ML_TYPE_LABEL[pub.listing_type_id] ?? pub.listing_type_id}
+                </span>
+              </div>
+              <div className="text-[30px] font-black text-[#00a650] leading-none mb-2">
+                ${fmtARS(Math.round(net))}
+              </div>
+              <div className="space-y-0.5 text-[11px]">
+                <div className="flex justify-between text-gray-600">
+                  <span>Precio de venta</span><span className="font-medium">${fmtARS(pub.price)}</span>
+                </div>
+                <div className="flex justify-between text-[#DC2626]">
+                  <span>Comisión ML ({(rate * 100).toFixed(0)}%)</span><span>−${fmtARS(Math.round(comm))}</span>
+                </div>
+                <div className="flex justify-between text-[#DC2626]">
+                  <span>IVA comisión (21%)</span><span>−${fmtARS(Math.round(ivaComm))}</span>
+                </div>
+                {pub.shipping?.free_shipping && (
+                  <div className="flex justify-between text-[#DC2626]">
+                    <span>Envío gratis (est.)</span><span>−${fmtARS(Math.round(shipping))}</span>
+                  </div>
+                )}
+              </div>
+              {realMargin !== null && (
+                <div className="mt-2 pt-2 border-t border-[#00a650]/20 flex items-center justify-between">
+                  <span className="text-[11px] text-gray-600">Margen actual</span>
+                  <span className={cn('text-[18px] font-black', mgColor(realMargin))}>{realMargin.toFixed(1)}%</span>
+                </div>
+              )}
+            </div>
+
+            {/* Shipping */}
+            {pub.shipping?.free_shipping ? (
+              <div className="flex items-center gap-1.5 text-[#00a650] text-[12px] font-semibold mb-2">
+                <Truck className="w-4 h-4" />
+                {pub.shipping.logistic_type === 'fulfillment' ? '⚡ Llega mañana — Envío gratis (Full)' : 'Envío gratis a todo el país'}
+              </div>
+            ) : (
+              <div className="text-[12px] text-gray-500 mb-2 flex items-center gap-1.5">
+                <Truck className="w-4 h-4" /> Envío a cargo del comprador
+              </div>
+            )}
+            <div className="text-[12px] text-gray-500 mb-4">
+              Stock: <strong className="text-[#07111F]">{pub.available_quantity}</strong> unidades
+            </div>
+
+            {/* Decorative CTAs */}
+            <div className="space-y-2 max-w-[260px]">
+              <div className="w-full py-2.5 rounded-xl bg-[#3483FA] text-white font-bold text-[13px] text-center opacity-80 select-none">Comprar ahora</div>
+              <div className="w-full py-2.5 rounded-xl border-2 border-[#3483FA] text-[#3483FA] font-bold text-[13px] text-center opacity-60 select-none">Agregar al carrito</div>
+            </div>
+          </div>
+
+          {/* ── RIGHT: Competitors + Simulator ─────────────────────────────── */}
+          <div className="w-[400px] shrink-0 overflow-y-auto bg-[#F4F7FA] flex flex-col">
+
+            {/* Match */}
+            <div className="px-4 pt-4 pb-2">
+              {matched ? (
+                <div className="bg-white rounded-xl border border-[#16A34A]/30 p-3">
+                  <div className="text-[10px] font-bold text-[#16A34A] uppercase tracking-wide mb-0.5">✓ Match en sistema</div>
+                  <div className="text-[12px] font-semibold text-[#07111F]">{matched.name}</div>
+                  {matched.sku && <div className="text-[10px] text-gray-400 font-mono mt-0.5">SKU: {matched.sku}</div>}
+                  {cost > 0 && (
+                    <div className="mt-1.5 text-[11px] flex items-center gap-3">
+                      <span className="text-gray-600">Costo: <span className="font-bold text-[#07111F]">${fmtARS(cost)}</span></span>
+                      {realUtilidad !== null && (
+                        <span className={cn('font-bold', mgColor(realMargin))}>
+                          {realUtilidad >= 0 ? '+' : ''}${fmtARS(Math.round(realUtilidad))} util.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <div className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-0.5">Sin match</div>
+                  <div className="text-[11px] text-amber-700">Importá el export de Odoo para ver rentabilidad</div>
+                </div>
+              )}
+            </div>
+
+            {/* ── Competencia — Real Trends style ───────────────────────── */}
+            <div className="px-4 pb-2">
+
+              {/* Header */}
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Competencia ML</span>
+                  {scouting && <RefreshCw className="w-3 h-3 text-[#3483FA] animate-spin" />}
+                </div>
+                {scoutTotal > 0 && (
+                  <span className="text-[10px] text-gray-400">{scoutTotal.toLocaleString('es-AR')} publicaciones</span>
+                )}
+              </div>
+
+              {/* Price stats strip */}
+              {scouts.length > 0 && (
+                <div className="bg-white rounded-lg border border-gray-200 px-3 py-2 mb-2.5 grid grid-cols-3 text-center divide-x divide-gray-100">
+                  <div className="pr-2">
+                    <div className="text-[8px] text-gray-400 uppercase font-bold tracking-wide">Mínimo</div>
+                    <div className="text-[13px] font-black text-[#07111F]">${fmtARS(Math.round(minCompPrice))}</div>
+                  </div>
+                  <div className="px-2">
+                    <div className="text-[8px] text-[#3483FA] uppercase font-bold tracking-wide">Promedio</div>
+                    <div className="text-[13px] font-black text-[#3483FA]">${fmtARS(Math.round(avgCompPrice))}</div>
+                  </div>
+                  <div className="pl-2">
+                    <div className="text-[8px] text-gray-400 uppercase font-bold tracking-wide">Máximo</div>
+                    <div className="text-[13px] font-black text-[#07111F]">${fmtARS(Math.round(maxCompPrice))}</div>
+                  </div>
+                </div>
+              )}
+
+              {!scouting && scouts.length === 0 && (
+                <div className="text-[11px] text-gray-400 py-2 text-center">
+                  Sin resultados — verificá App ID + Secret en Parámetros
+                </div>
+              )}
+
+              {/* Competitor cards */}
+              <div className="space-y-1.5">
+                {scouts.map((c, i) => {
+                  const diff = ((c.price - pub.price) / pub.price) * 100;
+                  const cheaper = c.price < pub.price;
+                  // Price position bar (0-100%)
+                  const pricePct = maxCompPrice > minCompPrice
+                    ? Math.round(((c.price - minCompPrice) / (maxCompPrice - minCompPrice)) * 100)
+                    : 50;
+                  return (
+                    <a key={c.id} href={c.permalink} target="_blank" rel="noreferrer"
+                      className="block bg-white rounded-xl border border-gray-200 p-2.5 hover:border-[#3483FA]/50 hover:shadow-md transition-all">
+                      <div className="flex gap-2">
+                        {/* Rank + photo */}
+                        <div className="shrink-0 text-center">
+                          <div className="text-[9px] font-black text-gray-300 mb-0.5">#{i + 1}</div>
+                          <img src={c.thumbnail ?? ''} alt=""
+                            className="w-11 h-11 rounded-lg object-contain bg-gray-50 border border-gray-100" />
+                        </div>
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[10px] text-gray-600 leading-tight line-clamp-2 mb-1.5">{c.title}</div>
+                          {/* Price row */}
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <span className="text-[14px] font-black text-[#07111F]">${fmtARS(c.price)}</span>
+                            <span className={cn('text-[10px] font-black px-1 py-0.5 rounded',
+                              cheaper ? 'bg-[#DC2626]/10 text-[#DC2626]' : 'bg-[#16A34A]/10 text-[#16A34A]')}>
+                              {cheaper ? '▼' : '▲'} {Math.abs(diff).toFixed(0)}%
+                            </span>
+                          </div>
+                          {/* Badges row */}
+                          <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+                            {c.freeShipping && (
+                              <span className="text-[9px] font-bold text-[#00a650] bg-[#00a650]/10 px-1.5 py-0.5 rounded-full">
+                                Envío gratis
+                              </span>
+                            )}
+                            {c.soldQty > 0 && (
+                              <span className="text-[9px] text-gray-500 font-semibold">
+                                {c.soldQty >= 1000
+                                  ? `${(c.soldQty / 1000).toFixed(1)}k vendidos`
+                                  : `${c.soldQty} vendidos`}
+                              </span>
+                            )}
+                            {c.installments && c.installments.rate === 0 && (
+                              <span className="text-[9px] text-[#3483FA] font-semibold">
+                                {c.installments.quantity}x sin interés
+                              </span>
+                            )}
+                          </div>
+                          {/* Price bar */}
+                          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={cn('h-full rounded-full transition-all',
+                              cheaper ? 'bg-[#DC2626]/50' : 'bg-[#3483FA]/40')}
+                              style={{ width: `${pricePct}%` }} />
+                          </div>
+                          {c.seller && (
+                            <div className="text-[9px] text-gray-400 mt-0.5 truncate">{c.seller}</div>
+                          )}
+                        </div>
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 🎮 Simulador — dark panel */}
+            <div className="bg-[#07111F] text-white px-4 py-4 flex-1">
+              <div className="text-[11px] font-black text-[#FFE600] uppercase tracking-widest mb-3">🎮 Simulador de precio</div>
+
+              {/* Price input */}
+              <div className="mb-3">
+                <label className="text-[10px] text-gray-400 uppercase tracking-wide mb-1 block">Precio a simular</label>
+                <div className="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-lg px-3 py-2 focus-within:border-[#FFE600] transition-colors">
+                  <span className="text-gray-400 font-bold text-[14px]">$</span>
+                  <input
+                    type="number"
+                    value={simPrice}
+                    onChange={e => setSimPrice(Number(e.target.value))}
+                    className="flex-1 bg-transparent text-white font-bold text-[16px] focus:outline-none text-center"
+                  />
+                </div>
+                <div className="flex gap-1 mt-2">
+                  {([-10, -5, 5, 10] as const).map(pct => (
+                    <button key={pct} onClick={() => setSimPrice(p => Math.round(p * (1 + pct / 100)))}
+                      className={cn('flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all',
+                        pct < 0
+                          ? 'bg-red-900/40 text-red-400 hover:bg-red-900/60'
+                          : 'bg-green-900/40 text-green-400 hover:bg-green-900/60')}>
+                      {pct > 0 ? '+' : ''}{pct}%
+                    </button>
+                  ))}
+                  <button onClick={() => setSimPrice(pub.price)}
+                    className="flex-1 py-1.5 rounded-lg text-[10px] font-bold bg-white/10 text-gray-400 hover:bg-white/20 transition-all">
+                    ↺
+                  </button>
+                </div>
+              </div>
+
+              {/* Cuotas selector */}
+              <div className="mb-4">
+                <label className="text-[10px] text-gray-400 uppercase tracking-wide mb-1.5 block">Cuotas sin interés</label>
+                <div className="grid grid-cols-5 gap-1">
+                  {([0, 3, 6, 9, 12] as const).map(c => (
+                    <button key={c} onClick={() => setSimCuotas(c)}
+                      className={cn('py-1.5 rounded-lg text-[11px] font-bold transition-all border',
+                        simCuotas === c
+                          ? 'bg-[#FFE600] text-[#07111F] border-[#FFE600]'
+                          : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/15')}>
+                      {c === 0 ? 'sin' : `${c}x`}
+                    </button>
+                  ))}
+                </div>
+                {simCuotas > 0 && (
+                  <div className="text-[10px] text-yellow-400/70 mt-1">
+                    Costo cuotas: {(ML_CUOTAS_COST[simCuotas] * 100).toFixed(1)}% → −${fmtARS(Math.round(simCalc.cuotasCost))}
+                  </div>
+                )}
+              </div>
+
+              {/* Live results */}
+              <div className="bg-white/5 rounded-xl p-3 space-y-1.5 mb-3">
+                <div className="flex justify-between text-[12px]">
+                  <span className="text-gray-400">Precio simulado</span>
+                  <span className="font-bold text-white">${fmtARS(simPrice)}</span>
+                </div>
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-gray-500">Comisión + IVA</span>
+                  <span className="text-red-400">−${fmtARS(Math.round(simCalc.comm + simCalc.ivaComm))}</span>
+                </div>
+                {pub.shipping?.free_shipping && (
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-500">Envío gratis</span>
+                    <span className="text-red-400">−${fmtARS(Math.round(simCalc.shipping))}</span>
+                  </div>
+                )}
+                {simCuotas > 0 && (
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-gray-500">Cuotas sin interés</span>
+                    <span className="text-red-400">−${fmtARS(Math.round(simCalc.cuotasCost))}</span>
+                  </div>
+                )}
+                <div className="border-t border-white/10 pt-1.5 flex justify-between text-[14px] font-black">
+                  <span className="text-gray-300">Neto que recibís</span>
+                  <span className="text-green-400">${fmtARS(Math.round(simCalc.net))}</span>
+                </div>
+                {cost > 0 && simUtilidad !== null && (
+                  <>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-gray-500">Costo producto</span>
+                      <span className="text-gray-400">−${fmtARS(cost)}</span>
+                    </div>
+                    <div className="flex justify-between text-[13px] font-black">
+                      <span className="text-gray-200">Utilidad</span>
+                      <span className={mgColor(simMargin)}>{simUtilidad >= 0 ? '+' : ''}${fmtARS(Math.round(simUtilidad))}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-gray-500">Margen</span>
+                      <span className={cn('text-[22px] font-black leading-none', mgColor(simMargin))}>{simMargin!.toFixed(1)}%</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Competitor positioning */}
+              {priceDiff !== null && (
+                <div className={cn('rounded-xl p-3 text-center text-[12px] font-semibold',
+                  Math.abs(priceDiff) < 3 ? 'bg-green-900/30 text-green-400'
+                  : priceDiff < -10 ? 'bg-blue-900/30 text-blue-300'
+                  : priceDiff < 0 ? 'bg-green-900/30 text-green-400'
+                  : priceDiff > 15 ? 'bg-red-900/30 text-red-400'
+                  : 'bg-yellow-900/30 text-yellow-400')}>
+                  {Math.abs(priceDiff) < 3
+                    ? '🎯 En el promedio del mercado'
+                    : priceDiff < -10
+                    ? `⬇️ ${Math.abs(priceDiff).toFixed(0)}% debajo — revisá si es sostenible`
+                    : priceDiff < 0
+                    ? `✅ ${Math.abs(priceDiff).toFixed(0)}% más barato — buena posición`
+                    : priceDiff > 15
+                    ? `⚠️ ${priceDiff.toFixed(0)}% más caro — riesgo de perder ventas`
+                    : `📊 ${priceDiff.toFixed(0)}% más caro que la competencia`}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Grid de publicaciones sincronizadas ─────────────────────────────────────
+
+function MLPublicaciones({
+  pubs, onSelect, syncing, lastSyncAt, onSync, authStatus, onConnect,
+}: {
+  pubs: MLPublication[];
+  onSelect: (pub: MLPublication) => void;
+  syncing: boolean;
+  lastSyncAt: string | null;
+  onSync: () => void;
+  authStatus: MLAuthStatus | null;
+  onConnect: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'sold' | 'price' | 'stock'>('sold');
+
+  const filtered = useMemo(() => {
+    let list = pubs;
+    if (query) {
+      const q = query.toLowerCase();
+      list = list.filter(p => p.title.toLowerCase().includes(q) || p.id.toLowerCase().includes(q));
+    }
+    return [...list].sort((a, b) =>
+      sortBy === 'price' ? b.price - a.price :
+      sortBy === 'stock' ? b.available_quantity - a.available_quantity :
+      b.sold_quantity - a.sold_quantity,
+    );
+  }, [pubs, query, sortBy]);
+
+  // ── Not connected screen ──────────────────────────────────────────────────
+  if (!authStatus?.connected) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="text-center max-w-sm">
+          <div className="w-20 h-20 bg-[#FFE600] rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg">
+            <ShoppingCart className="w-10 h-10 text-[#07111F]" />
+          </div>
+          <h2 className="text-[22px] font-black text-[#07111F] mb-2">Conectá tu cuenta ML</h2>
+          <p className="text-[13px] text-gray-500 mb-6 leading-relaxed">
+            Sincronizá tus publicaciones para ver rentabilidad, stock y análisis combinado con tus costos.
+          </p>
+          <button onClick={onConnect}
+            className="flex items-center gap-2 px-6 py-3 bg-[#FFE600] text-[#07111F] font-black text-[14px] rounded-xl hover:bg-[#FFC400] transition-all mx-auto shadow-md active:scale-95">
+            <Zap className="w-5 h-5" /> Conectar con MercadoLibre
+          </button>
+          <p className="text-[11px] text-gray-400 mt-4">
+            Requiere ML App ID + Secret en Parámetros globales
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Connected view ────────────────────────────────────────────────────────
+  return (
+    <div className="p-5">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 mb-5 flex-wrap">
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="w-2 h-2 rounded-full bg-[#16A34A]" />
+          <span className="text-[12px] font-bold text-gray-700">
+            {authStatus.nickname ?? 'Conectado'}
+          </span>
+          {lastSyncAt && (
+            <span className="text-[11px] text-gray-400">
+              · {new Date(lastSyncAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          {pubs.length > 0 && (
+            <span className="text-[11px] font-bold text-[#3483FA]">
+              {pubs.length} publicaciones
+            </span>
+          )}
+        </div>
+
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+          <input value={query} onChange={e => setQuery(e.target.value)}
+            placeholder="Buscar publicación…"
+            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-[12px] bg-white focus:outline-none focus:ring-2 focus:ring-[#FFE600]/50" />
+        </div>
+
+        <select value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-[12px] bg-white focus:outline-none">
+          <option value="sold">Más vendidos</option>
+          <option value="price">Mayor precio</option>
+          <option value="stock">Mayor stock</option>
+        </select>
+
+        <button onClick={onSync} disabled={syncing}
+          className="flex items-center gap-1.5 px-4 py-2 bg-[#FFE600] text-[#07111F] font-bold text-[12px] rounded-lg hover:bg-[#FFC400] disabled:opacity-60 transition-all active:scale-95">
+          <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
+          {syncing ? 'Sincronizando…' : pubs.length > 0 ? 'Actualizar' : 'Sincronizar ahora'}
+        </button>
+      </div>
+
+      {/* Empty state */}
+      {pubs.length === 0 && !syncing && (
+        <div className="text-center py-20">
+          <Package className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+          <p className="font-semibold text-gray-500 mb-1">Sin publicaciones sincronizadas</p>
+          <p className="text-[12px] text-gray-400">Presioná "Sincronizar ahora" para cargar tus publicaciones activas</p>
+        </div>
+      )}
+
+      {syncing && pubs.length === 0 && (
+        <div className="text-center py-20">
+          <RefreshCw className="w-10 h-10 mx-auto mb-3 text-[#3483FA] animate-spin" />
+          <p className="text-gray-500 font-medium">Sincronizando publicaciones…</p>
+        </div>
+      )}
+
+      {/* Card grid */}
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+        {filtered.map(pub => {
+          const { rate, net } = calcMLNet(pub.price, pub.listing_type_id, pub.shipping?.free_shipping, pub.shipping?.logistic_type);
+          const matched = findMatchedProduct(pub);
+          const cost    = matched?.cost ?? 0;
+          const margin  = cost > 0 ? ((net - cost) / pub.price) * 100 : null;
+
+          return (
+            <button key={pub.id} onClick={() => onSelect(pub)}
+              className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-[#FFE600] transition-all text-left group flex flex-col">
+              {/* Photo */}
+              <div className="bg-gray-50 flex items-center justify-center relative" style={{ height: 156 }}>
+                <img
+                  src={(pub.thumbnail ?? '').replace('-I.jpg', '-O.jpg')}
+                  alt={pub.title}
+                  className="max-h-full max-w-full object-contain p-3"
+                />
+                {pub.shipping?.free_shipping && (
+                  <span className="absolute top-2 left-2 text-[9px] bg-[#00a650] text-white font-bold px-1.5 py-0.5 rounded-md">
+                    {pub.shipping.logistic_type === 'fulfillment' ? '⚡ Full' : 'Gratis'}
+                  </span>
+                )}
+                {pub.catalog_listing && (
+                  <span className="absolute top-2 right-2 text-[9px] bg-[#3483FA] text-white font-bold px-1.5 py-0.5 rounded-md">
+                    CAT
+                  </span>
+                )}
+              </div>
+
+              {/* Body */}
+              <div className="p-3 flex-1 flex flex-col">
+                <p className="text-[11px] text-[#07111F] font-medium leading-snug line-clamp-2 mb-2 flex-1">{pub.title}</p>
+
+                <div className="text-[19px] font-black text-[#07111F] mb-1">
+                  ${pub.price.toLocaleString('es-AR', { maximumFractionDigits: 0 })}
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-gray-400 mb-2">
+                  <span>{pub.sold_quantity} vendidos</span>
+                  <span>{pub.available_quantity} stock</span>
+                </div>
+
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-[9px] bg-[#FFE600]/30 text-[#07111F] font-bold px-1.5 py-0.5 rounded-md">
+                    {ML_TYPE_LABEL[pub.listing_type_id] ?? pub.listing_type_id} {(rate * 100).toFixed(0)}%
+                  </span>
+                  {margin !== null && (
+                    <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-md ml-auto',
+                      margin >= 25 ? 'bg-green-100 text-green-700' :
+                      margin >= 0  ? 'bg-orange-100 text-orange-700' :
+                      'bg-red-100 text-red-600')}>
+                      {margin.toFixed(0)}% mg
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="px-3 pb-2.5 flex items-center gap-1 text-[10px] text-gray-400 group-hover:text-[#3483FA] transition-colors">
+                <Eye className="w-3 h-3" /> Simulación →
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PRODUCT FICHA / LABORATORIO
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1901,8 +2655,6 @@ function ProductFicha({
 
       if (result.ok) {
         setScout({ items: result.items, market: result.market });
-      } else if (result.error === 'credentials') {
-        setScoutError('credentials');
       } else {
         setScoutError(result.error ?? 'Error ML');
       }
@@ -3208,7 +3960,7 @@ function ProductFicha({
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-type MainTab = 'dashboard' | 'importar' | 'tabla' | 'export';
+type MainTab = 'dashboard' | 'importar' | 'tabla' | 'export' | 'publicaciones';
 
 export default function MLLabPage() {
   const store = useMLLabStore();
@@ -3231,9 +3983,82 @@ export default function MLLabPage() {
   const [geminiInput,  setGeminiInput]  = useState('');
   const [showGeminiKey, setShowGeminiKey] = useState(false);
 
+  // ── ML Sync state ─────────────────────────────────────────────────────────
+  const [mlAuthStatus,  setMlAuthStatus]  = useState<MLAuthStatus | null>(null);
+  const [syncedPubs,    setSyncedPubs]    = useState<MLPublication[]>([]);
+  const [lastSyncAt,    setLastSyncAt]    = useState<string | null>(null);
+  const [syncing,       setSyncing]       = useState(false);
+  const [selectedPub,   setSelectedPub]   = useState<MLPublication | null>(null);
+  const [syncError,     setSyncError]     = useState<string | null>(null);
+
   // Load Gemini key from server on mount
   useEffect(() => {
     loadGeminiKeyAsync().then(k => { setGeminiKey(k); setGeminiInput(k); });
+  }, []);
+
+  // Check ML auth status + load cached pubs on mount
+  useEffect(() => {
+    fetch('/api/ml-oauth?action=status')
+      .then(r => r.json())
+      .then((d: MLAuthStatus) => setMlAuthStatus(d))
+      .catch(() => {});
+
+    try {
+      const raw = localStorage.getItem('acqua_ml_pubs_v1');
+      if (raw) {
+        const data = JSON.parse(raw) as { items: MLPublication[]; syncedAt: string };
+        setSyncedPubs(data.items ?? []);
+        setLastSyncAt(data.syncedAt ?? null);
+      }
+    } catch { /* ignore */ }
+
+    // Handle OAuth callback result from URL params
+    const params = new URLSearchParams(window.location.search);
+    const authResult = params.get('ml_auth');
+    if (authResult === 'ok') {
+      const user = params.get('user') ?? '';
+      setMlAuthStatus({ connected: true, nickname: user });
+      setActiveTab('publicaciones');
+      window.history.replaceState({}, '', '/mercadolibre');
+    } else if (authResult === 'error') {
+      setSyncError(`Error de autenticación ML: ${params.get('reason') ?? 'desconocido'}`);
+      window.history.replaceState({}, '', '/mercadolibre');
+    }
+  }, []);
+
+  // Connect via OAuth
+  const handleMLConnect = useCallback(async () => {
+    const res = await fetch('/api/ml-oauth?action=url').then(r => r.json()) as { ok: boolean; url?: string; error?: string };
+    if (!res.ok || !res.url) {
+      setSyncError(res.error ?? 'No se pudo obtener la URL de autorización');
+      return;
+    }
+    window.location.href = res.url;
+  }, []);
+
+  // Sync publications from ML
+  const handleMLSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      const res = await fetch('/api/ml-sync').then(r => r.json()) as {
+        ok: boolean; items?: MLPublication[]; syncedAt?: string; error?: string; needsAuth?: boolean;
+      };
+      if (res.ok && res.items) {
+        setSyncedPubs(res.items);
+        setLastSyncAt(res.syncedAt ?? null);
+        try {
+          localStorage.setItem('acqua_ml_pubs_v1', JSON.stringify({ items: res.items, syncedAt: res.syncedAt }));
+        } catch { /* ignore */ }
+      } else {
+        setSyncError(res.error ?? 'Error al sincronizar');
+        if (res.needsAuth) setMlAuthStatus({ connected: false });
+      }
+    } catch (e) {
+      setSyncError(String(e));
+    } finally {
+      setSyncing(false);
+    }
   }, []);
 
   const selectedProduct = useMemo(
@@ -3385,10 +4210,11 @@ export default function MLLabPage() {
         <div className="max-w-[1920px] mx-auto px-5 lg:px-8">
           <div className="flex gap-0">
             {([
-              { key: 'dashboard', label: '🏠 Dashboard',  badge: stats.pierde > 0 ? stats.pierde : undefined },
-              { key: 'importar',  label: '📥 Importar', badge: (mlRows.length > 1 ? 1 : 0) + (odooRows.length > 1 ? 1 : 0) || undefined },
-              { key: 'tabla',     label: `📋 Tabla`,      badge: stats.total || undefined },
-              { key: 'export',    label: '📤 Export Odoo' },
+              { key: 'dashboard',      label: '🏠 Dashboard',     badge: stats.pierde > 0 ? stats.pierde : undefined },
+              { key: 'publicaciones',  label: '🛍️ Publicaciones', badge: syncedPubs.length || undefined },
+              { key: 'importar',       label: '📥 Importar',      badge: (mlRows.length > 1 ? 1 : 0) + (odooRows.length > 1 ? 1 : 0) || undefined },
+              { key: 'tabla',          label: `📋 Tabla`,          badge: stats.total || undefined },
+              { key: 'export',         label: '📤 Export Odoo' },
             ] as { key: MainTab; label: string; badge?: number }[]).map(t => (
               <button key={t.key} onClick={() => setActiveTab(t.key)}
                 className={cn(
@@ -3433,8 +4259,32 @@ export default function MLLabPage() {
             <TableTab store={store} onSelectProduct={handleSelectProduct} selectedId={selectedId} initialProfitFilter={tablaFilterReq} />
           )}
           {activeTab === 'export' && <ExportTab store={store} />}
+          {activeTab === 'publicaciones' && (
+            <>
+              {syncError && (
+                <div className="mx-5 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-[12px] text-red-700 flex items-center justify-between">
+                  <span>⚠️ {syncError}</span>
+                  <button onClick={() => setSyncError(null)} className="text-red-400 hover:text-red-600"><X className="w-4 h-4" /></button>
+                </div>
+              )}
+              <MLPublicaciones
+                pubs={syncedPubs}
+                onSelect={setSelectedPub}
+                syncing={syncing}
+                lastSyncAt={lastSyncAt}
+                onSync={handleMLSync}
+                authStatus={mlAuthStatus}
+                onConnect={handleMLConnect}
+              />
+            </>
+          )}
         </div>
       </div>
+
+      {/* ML Simulation modal */}
+      {selectedPub && (
+        <MLSimulacion pub={selectedPub} onClose={() => setSelectedPub(null)} />
+      )}
 
       {/* Product detail modal — only for Tabla tab */}
       {selectedProduct && activeTab === 'tabla' && (

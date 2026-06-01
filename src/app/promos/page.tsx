@@ -982,35 +982,84 @@ ${gifts ? '\n' + gifts + '\n' : ''}
               <h2 className="text-xl font-bold text-gray-900">¿Qué querés lograr con esta promo?</h2>
               <p className="text-gray-500 text-sm mt-1">El objetivo define qué tipos de promo te van a funcionar mejor.</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
               {OBJETIVOS.map(o => {
                 const Icon = o.icon;
                 const sel  = objetivo === o.key;
+                // Extract base color for selected state gradients
+                const gradients: Record<string, string> = {
+                  'bg-blue-50 border-blue-200':    'from-blue-600 to-blue-500',
+                  'bg-emerald-50 border-emerald-200': 'from-emerald-600 to-emerald-500',
+                  'bg-pink-50 border-pink-200':    'from-pink-600 to-pink-500',
+                  'bg-orange-50 border-orange-200': 'from-orange-600 to-orange-500',
+                  'bg-purple-50 border-purple-200': 'from-purple-600 to-purple-500',
+                };
+                const iconBgs: Record<string, string> = {
+                  'bg-blue-50 border-blue-200':    'bg-blue-100',
+                  'bg-emerald-50 border-emerald-200': 'bg-emerald-100',
+                  'bg-pink-50 border-pink-200':    'bg-pink-100',
+                  'bg-orange-50 border-orange-200': 'bg-orange-100',
+                  'bg-purple-50 border-purple-200': 'bg-purple-100',
+                };
+                const grad   = gradients[o.color] ?? 'from-gray-700 to-gray-600';
+                const iconBg = iconBgs[o.color]   ?? 'bg-gray-100';
                 return (
                   <button
                     key={o.key}
                     onClick={() => setObjetivo(o.key)}
                     className={cn(
-                      'text-left p-5 rounded-2xl border-2 transition-all hover:shadow-md',
+                      'relative text-left rounded-2xl border-2 transition-all overflow-hidden group',
                       sel
-                        ? `${o.color} border-current shadow-md`
-                        : 'bg-white border-gray-100 hover:border-gray-200',
+                        ? 'border-transparent shadow-xl shadow-black/10 scale-[1.02]'
+                        : 'bg-white border-gray-100 hover:border-gray-200 hover:shadow-md hover:scale-[1.01]',
                     )}
                   >
-                    <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center mb-3', sel ? 'bg-white/60' : 'bg-gray-100')}>
-                      <Icon className={cn('w-5 h-5', sel ? o.text : 'text-gray-400')} />
-                    </div>
-                    <div className={cn('font-bold text-[15px] mb-2', sel ? o.text : 'text-gray-800')}>
-                      {o.label}
-                    </div>
-                    <p className={cn('text-[12px] leading-relaxed', sel ? o.text + ' opacity-80' : 'text-gray-500')}>
-                      {o.desc}
-                    </p>
+                    {/* Selected: gradient background */}
                     {sel && (
-                      <div className={cn('mt-3 flex items-center gap-1 text-[11px] font-semibold', o.text)}>
-                        <Check className="w-3 h-3" /> Seleccionado
-                      </div>
+                      <div className={cn('absolute inset-0 bg-gradient-to-br', grad)} />
                     )}
+
+                    <div className="relative z-10 p-5 flex flex-col h-full min-h-[200px]">
+                      {/* Icon block */}
+                      <div className={cn(
+                        'w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-all',
+                        sel ? 'bg-white/20' : iconBg,
+                      )}>
+                        <Icon className={cn('w-6 h-6 transition-colors', sel ? 'text-white' : o.text)} />
+                      </div>
+
+                      {/* Label */}
+                      <div className={cn(
+                        'font-black text-[16px] mb-2 leading-tight',
+                        sel ? 'text-white' : 'text-gray-900',
+                      )}>
+                        {o.label}
+                      </div>
+
+                      {/* Description */}
+                      <p className={cn(
+                        'text-[12px] leading-relaxed flex-1',
+                        sel ? 'text-white/80' : 'text-gray-500',
+                      )}>
+                        {o.desc}
+                      </p>
+
+                      {/* Bottom: selected checkmark OR tipos count */}
+                      <div className="mt-4">
+                        {sel ? (
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold text-white/90">
+                            <div className="w-4 h-4 rounded-full bg-white/25 flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5 text-white" />
+                            </div>
+                            Seleccionado
+                          </div>
+                        ) : (
+                          <div className={cn('text-[10px] font-semibold uppercase tracking-wider', o.text, 'opacity-70')}>
+                            {o.tipos.length} tipos disponibles →
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </button>
                 );
               })}
@@ -1322,6 +1371,38 @@ ${gifts ? '\n' + gifts + '\n' : ''}
                   </div>
                 </div>
               </div>
+
+              {/* ── Por unidad (por_cantidad / 2da_unidad) ── */}
+              {(tipo === 'por_cantidad' || tipo === '2da_unidad') && (() => {
+                const mainItems = items.filter(i => !i.isGift);
+                const totalQty  = mainItems.reduce((a, i) => a + i.qty, 0);
+                if (totalQty < 2) return null;
+                const pricePerUnit  = calc.promoPrice / totalQty;
+                const costPerUnit   = calc.totalCost  / totalQty;
+                const profitPerUnit = pricePerUnit - costPerUnit;
+                const marginPerUnit = pricePerUnit > 0 ? (profitPerUnit / pricePerUnit) * 100 : 0;
+                const okColor = marginPerUnit >= 40 ? '#16A34A' : marginPerUnit >= 30 ? '#F97316' : '#EF4444';
+                return (
+                  <div className="mt-4 rounded-xl border-2 p-4" style={{ borderColor: okColor + '40', background: okColor + '08' }}>
+                    <p className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: okColor }}>
+                      📦 Por unidad · {totalQty} {totalQty === 2 ? 'unidades' : `unidades`}
+                    </p>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[
+                        { label: 'Precio c/u',  value: formatARS(Math.round(pricePerUnit)),  bold: true,  color: '#0784F2' },
+                        { label: 'Costo c/u',   value: formatARS(Math.round(costPerUnit)),   bold: false, color: '#6B7280' },
+                        { label: 'Ganancia c/u',value: formatARS(Math.round(profitPerUnit)), bold: false, color: profitPerUnit >= 0 ? '#16A34A' : '#EF4444' },
+                        { label: 'Margen c/u',  value: `${Math.round(marginPerUnit)}%`,      bold: true,  color: okColor },
+                      ].map(c => (
+                        <div key={c.label} className="text-center">
+                          <p className="text-[9px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">{c.label}</p>
+                          <p className="text-[15px] font-black leading-tight" style={{ color: c.color }}>{c.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Modo de precio */}
               <div className="mt-4 bg-white rounded-xl border border-gray-100 p-4">

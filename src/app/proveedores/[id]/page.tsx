@@ -1165,6 +1165,15 @@ interface CatalogItem {
   acquaCost?: number;
   acquaPrice?: number;
   source: 'excel' | 'ai';
+  photo?: string | null;   // data-URL from PDF catalog (not persisted)
+}
+
+// Extracted image from a supplier PDF catalog
+interface PdfImage {
+  page: number; position: number; total_on_page: number;
+  code: string | null;   // matched product code (null if unmatched)
+  name: string; ext: string; mime: string; size: number; base64: string;
+  codes_on_page: string[]; brands_on_page: string[]; text_snippet: string;
 }
 
 // ── Helpers compartidos de parsing ─────────────────────────────────────────
@@ -1191,6 +1200,7 @@ function buildMatchMaps(supplierProductCodes?: string[]) {
 function parseCatalogSheets(
   sheets: { name: string; rows: unknown[][] }[],
   supplierProductCodes?: string[],
+  forceARS?: boolean,
 ): CatalogItem[] {
   const items: CatalogItem[] = [];
   const { byCode, byName } = buildMatchMaps(supplierProductCodes);
@@ -1210,27 +1220,36 @@ function parseCatalogSheets(
 
   // Detecta la fila de encabezado y devuelve los índices de columnas + moneda detectada
   const detectColumns = (rows: unknown[][]): { codeCol: number; descCol: number; priceCol: number; unitCol: number; packCol: number; priceIsARS: boolean } => {
-    for (let i = 0; i < Math.min(12, rows.length); i++) {
+    for (let i = 0; i < Math.min(15, rows.length); i++) {
       const row = rows[i] as unknown[];
       if (!row) continue;
       for (let c = 0; c < row.length; c++) {
         const cell = norm(row[c]).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-        if (cell === 'codigo' || cell === 'cod.' || cell === 'cod' || cell === 'art' || cell === 'articulo') {
+        // 'art.' cubre encabezados tipo "ART." (Veneno); 'art' cubre "ART" sin punto
+        if (cell === 'codigo' || cell === 'cod.' || cell === 'cod' || cell === 'art.' || cell === 'art' || cell === 'articulo') {
           const descCol = row.slice(c+1).findIndex(v => {
             const s = norm(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
             return s.includes('descri') || s.includes('produc') || s.includes('articulo') || s.includes('nombre') || s.includes('denom');
           });
-          // Orden de preferencia: columnas USD primero, luego ARS/Final
-          const priceUSDIdx = row.slice(c).findIndex(v => {
-            const s = norm(v).toLowerCase();
-            return s.includes('precio') || s === 'usd' || s === 'u$s' || s === '$' || s.includes('lista') || s.includes('publico');
-          });
+          // Columnas ARS: COMERCIO, PUBLICO, FINAL, NETO, ARS — tienen prioridad
           const priceARSIdx = row.slice(c).findIndex(v => {
             const s = norm(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-            return s === 'final' || s === 'neto' || s === 'precio final' || s === 'precio neto' || s === 'p neto' || s.includes('precio final') || s.includes('precio neto') || s === 'ars';
+            return s === 'comercio' || s === 'publico' || s === 'final' || s === 'neto'
+              || s === 'precio final' || s === 'precio neto' || s === 'p neto'
+              || s.includes('precio final') || s.includes('precio neto') || s === 'ars'
+              || s === 'p.venta' || s === 'pventa' || s === 'p. venta'
+              || s === 'precio venta' || s === 'p venta';
           });
-          const isARS    = priceUSDIdx === -1 && priceARSIdx !== -1;
-          const priceIdx = priceUSDIdx !== -1 ? priceUSDIdx : priceARSIdx;
+          // Columnas USD: USD, U$S, $, LISTA (solo si no hay columna ARS explícita)
+          const priceUSDIdx = row.slice(c).findIndex(v => {
+            const s = norm(v).toLowerCase();
+            return s === 'usd' || s === 'u$s' || s === '$' || s.includes('lista')
+              || (s.includes('precio') && !s.includes('final') && !s.includes('neto'));
+          });
+          // Si encontramos una columna ARS específica (COMERCIO/PUBLICO/etc.), la preferimos
+          // forceARS = true cuando el usuario eligió "Pesos ARS" antes de subir
+          const isARS    = forceARS || priceARSIdx !== -1;
+          const priceIdx = priceARSIdx !== -1 ? priceARSIdx : priceUSDIdx;
           return {
             codeCol:  c,
             descCol:  descCol >= 0 ? c + 1 + descCol : c + 1,
@@ -1243,7 +1262,7 @@ function parseCatalogSheets(
       }
     }
     // Fallback a estructura Vulcano estándar (col[1]=código, col[2]=desc, col[6]=precio USD)
-    return { codeCol: 1, descCol: 2, priceCol: 6, unitCol: 7, packCol: 8, priceIsARS: false };
+    return { codeCol: 1, descCol: 2, priceCol: 6, unitCol: 7, packCol: 8, priceIsARS: forceARS ?? false };
   };
 
   let idx = 0;
@@ -1275,7 +1294,8 @@ function parseCatalogSheets(
         // Es categoría: texto, no muy largo, no es encabezado de columna
         if (!c1s || c1s.length > 60) continue;
         const lower = c1s.toLowerCase();
-        if (['código','codigo','descripción','descripcion','precio','usd','u$s','cantidad','unidad','pack'].includes(lower)) continue;
+        if (['código','codigo','descripción','descripcion','precio','usd','u$s','cantidad','unidad','pack',
+             'art.','art','cod.','cod','articulo','comercio','publico','final','neto','caja','bulto','lista'].includes(lower)) continue;
         cat = c1s;
       }
     }
@@ -1346,10 +1366,15 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
   const [savedAt,     setSavedAt]     = useState<string | null>(null);
   const [savingCat,   setSavingCat]   = useState(false);
   const [saveOk,      setSaveOk]      = useState(false);
+  // ── Fotos del catálogo PDF ─────────────────────────────────────────────
+  const [photoMap,      setPhotoMap]      = useState<Record<string, string>>({});   // code → dataUrl
+  const [pdfProcessing, setPdfProcessing] = useState(false);
+  const [photoCount,    setPhotoCount]    = useState(0);
   // ── Aplicar costos desde catálogo ──────────────────────────────────────
   const [applyingCostId, setApplyingCostId] = useState<string | null>(null);
   const [appliedCosts,   setAppliedCosts]   = useState<Set<string>>(new Set());
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef    = useRef<HTMLInputElement>(null);
+  const pdfOnlyRef = useRef<HTMLInputElement>(null);
 
   const supplierSlug = supplierName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
 
@@ -1432,7 +1457,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
     if (!confirm(`¿Borrar el catálogo guardado de ${supplierName}? No se puede deshacer.`)) return;
     await fetch(`/api/supplier-catalog?slug=${encodeURIComponent(supplierSlug)}`, { method: 'DELETE' });
     setSavedAt(null);
-    setPhase('idle'); setItems([]); setQtys({}); setFileName(''); setFileType(''); setError(''); setAiSummary('');
+    setPhase('idle'); setItems([]); setQtys({}); setFileName(''); setFileType(''); setError(''); setAiSummary(''); setPhotoMap({}); setPhotoCount(0);
   };
 
   const sheetNames = useMemo(() => ['todas', ...Array.from(new Set(items.map(i => i.sheet)))], [items]);
@@ -1455,6 +1480,116 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
 
   const priceInARS = (item: CatalogItem) => item.priceARS ?? (item.priceUSD && usdRate > 0 ? item.priceUSD * usdRate : null);
 
+  // ── Convertir un File a base64 ────────────────────────────────────────
+  const fileToBase64 = async (f: File): Promise<string> => {
+    const buf   = await f.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let b64 = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      b64 += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+    }
+    return btoa(b64);
+  };
+
+  // ── Extraer fotos de PDFs del proveedor y añadirlas al photoMap ───────
+  const extractPhotosFromPDFs = async (pdfFiles: File[]) => {
+    setPdfProcessing(true);
+    const newMap: Record<string, string> = {};
+    let matched = 0;
+    for (const f of pdfFiles) {
+      try {
+        const b64 = await fileToBase64(f);
+        const res = await fetch('/api/extract-pdf-photos', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pdfBase64: b64 }),
+        });
+        const data = await res.json() as { ok: boolean; images?: PdfImage[]; error?: string };
+        if (!data.ok || !data.images) continue;
+
+        // El script Python ya hizo el matching espacial (code → imagen)
+        for (const img of data.images) {
+          if (img.code && img.base64) {
+            newMap[String(img.code)] = `data:${img.mime};base64,${img.base64}`;
+            matched++;
+          }
+        }
+      } catch (e) {
+        console.error('[catalog] PDF photo extraction error:', f.name, e);
+      }
+    }
+    setPhotoMap(prev => ({ ...prev, ...newMap }));
+    setPhotoCount(c => c + matched);
+    setPdfProcessing(false);
+  };
+
+  // ── Entrada principal: maneja múltiples archivos (Excel + PDF) ─────────
+  const handleFiles = async (fileList: File[]) => {
+    setError('');
+    const excelFiles = fileList.filter(f => /\.(xlsx|xls)$/i.test(f.name));
+    const pdfFiles   = fileList.filter(f => /\.pdf$/i.test(f.name));
+    const imgFiles   = fileList.filter(f => /\.(jpe?g|png|webp|gif|heic)$/i.test(f.name));
+
+    // Nombre para mostrar en el header
+    const displayName = fileList.length === 1 ? fileList[0].name : `${fileList.length} archivos`;
+    setFileName(displayName);
+
+    // ── CASO 1: hay Excel → cargar catálogo ──────────────────────────────
+    if (excelFiles.length > 0) {
+      setFileType('excel');
+      setPhase('reading');
+      try {
+        let allItems: CatalogItem[] = [];
+        for (const f of excelFiles) {
+          const buf    = await f.arrayBuffer();
+          const wb     = XLSX.read(buf, { type: 'array', cellDates: false });
+          const sheets = wb.SheetNames.map(name => ({
+            name,
+            rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: '', blankrows: false }),
+          }));
+          const parsed = parseCatalogSheets(sheets, supplierProductCodes, currency === 'ARS');
+          allItems = [...allItems, ...parsed];
+        }
+        // Deduplicar (mismo código + hoja)
+        const seen = new Set<string>();
+        allItems = allItems.filter(i => {
+          const key = `${i.code}|${i.sheet}`;
+          if (seen.has(key)) return false;
+          seen.add(key); return true;
+        });
+        setItems(allItems);
+        const hasARS = allItems.some(i => i.priceARS != null);
+        const hasUSD = allItems.some(i => i.priceUSD != null);
+        setCurrency(hasARS && !hasUSD ? 'ARS' : 'USD');
+        if (hasARS && !hasUSD) setUsdRate(0);
+        setPhase('ready');
+      } catch (e) {
+        setError('Error leyendo el Excel: ' + String(e));
+        setPhase('idle');
+        return;
+      }
+      // Si también vienen PDFs, extraer fotos en paralelo (no bloquea el catálogo)
+      if (pdfFiles.length > 0) {
+        void extractPhotosFromPDFs(pdfFiles);
+      }
+      return;
+    }
+
+    // ── CASO 2: solo PDFs → si ya hay catálogo cargado, extraer fotos ────
+    if (pdfFiles.length > 0 && imgFiles.length === 0) {
+      void extractPhotosFromPDFs(pdfFiles);
+      return;
+    }
+
+    // ── CASO 3: imagen/PDF solo → flujo AI (comportamiento original) ─────
+    const singleFile = imgFiles[0] ?? pdfFiles[0];
+    if (singleFile) {
+      await handleFile(singleFile);
+    }
+  };
+
+  // ── Flujo original: un solo archivo PDF/imagen vía IA Gemini ──────────
   const handleFile = async (f: File) => {
     setError('');
     setFileName(f.name);
@@ -1471,7 +1606,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
           name,
           rows: XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[name], { header: 1, defval: '', blankrows: false }),
         }));
-        const parsed = parseCatalogSheets(sheets, supplierProductCodes);
+        const parsed = parseCatalogSheets(sheets, supplierProductCodes, currency === 'ARS');
         setItems(parsed);
         const hasARS = parsed.some(i => i.priceARS != null);
         const hasUSD = parsed.some(i => i.priceUSD != null);
@@ -1483,14 +1618,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
       if (!geminiKey) { setError('Para leer PDF e imágenes configurá tu clave Gemini en ML Lab → Parámetros globales → Clave IA.'); return; }
       setPhase('ai_processing');
       try {
-        const buf  = await f.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let b64 = '';
-        const chunkSize = 8192;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          b64 += String.fromCharCode(...bytes.slice(i, i + chunkSize));
-        }
-        b64 = btoa(b64);
+        const b64 = await fileToBase64(f);
         const mimeType = ftype === 'pdf' ? 'application/pdf' : (f.type || 'image/jpeg');
         const res = await fetch('/api/catalog-ai', {
           method: 'POST',
@@ -1508,7 +1636,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
     }
   };
 
-  const reset = () => { setPhase('idle'); setItems([]); setQtys({}); setFileName(''); setFileType(''); setError(''); setAiSummary(''); };
+  const reset = () => { setPhase('idle'); setItems([]); setQtys({}); setFileName(''); setFileType(''); setError(''); setAiSummary(''); setPhotoMap({}); setPhotoCount(0); };
   const setQty = (id: string, qty: number) => setQtys(prev => qty > 0 ? { ...prev, [id]: qty } : (({ [id]: _, ...rest }) => rest)(prev));
 
   const exportCSV = () => downloadCSV([
@@ -1612,6 +1740,40 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                 )}
               </div>
             )}
+            {/* ── Botón Agregar fotos (cuando catálogo ya está cargado) ── */}
+            {(phase === 'ready' || phase === 'review') && (
+              <>
+                <button
+                  onClick={() => pdfOnlyRef.current?.click()}
+                  disabled={pdfProcessing}
+                  title="Subí el catálogo PDF del proveedor para agregar fotos a los productos"
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors',
+                    pdfProcessing
+                      ? 'bg-orange-50 text-orange-500 border-orange-200 cursor-wait'
+                      : photoCount > 0
+                      ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+                      : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100',
+                  )}
+                >
+                  {pdfProcessing ? (
+                    <><RefreshCw className="w-3 h-3 animate-spin" /> Extrayendo fotos…</>
+                  ) : photoCount > 0 ? (
+                    <>📸 {photoCount} fotos</>
+                  ) : (
+                    <>📸 Agregar fotos PDF</>
+                  )}
+                </button>
+                <input
+                  ref={pdfOnlyRef}
+                  type="file"
+                  accept=".pdf"
+                  multiple
+                  className="hidden"
+                  onChange={e => { const fs = e.target.files; if (fs?.length) void extractPhotosFromPDFs(Array.from(fs)); }}
+                />
+              </>
+            )}
             <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
               <X className="w-4 h-4" />
             </button>
@@ -1673,24 +1835,24 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
               <div
                 onDragOver={e => { e.preventDefault(); setDragging(true); }}
                 onDragLeave={() => setDragging(false)}
-                onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+                onDrop={e => { e.preventDefault(); setDragging(false); const fs = e.dataTransfer.files; if (fs?.length) void handleFiles(Array.from(fs)); }}
                 onClick={() => fileRef.current?.click()}
                 className={cn('border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-colors w-full max-w-lg',
                   dragging ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/40')}
               >
                 <FileSpreadsheet className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                <p className="text-[16px] font-semibold text-gray-600">Arrastrá la lista de precios</p>
-                <p className="text-[13px] text-gray-400 mt-1">o hacé click para seleccionar</p>
+                <p className="text-[16px] font-semibold text-gray-600">Arrastrá los archivos del proveedor</p>
+                <p className="text-[13px] text-gray-400 mt-1">Excel + PDF catálogo juntos, o por separado</p>
                 <div className="flex items-center justify-center gap-2 mt-4 flex-wrap">
                   {[
                     { l: '📊 Excel .xlsx', c: 'bg-green-50 border-green-200 text-green-700' },
-                    { l: '📄 PDF', c: 'bg-red-50 border-red-200 text-red-700' },
+                    { l: '📄 PDF con fotos', c: 'bg-red-50 border-red-200 text-red-700' },
                     { l: '🖼️ Imagen JPG/PNG', c: 'bg-blue-50 border-blue-200 text-blue-700' },
                   ].map(f => <span key={f.l} className={cn('px-2.5 py-1 rounded-lg border text-[11px] font-medium', f.c)}>{f.l}</span>)}
                 </div>
-                <p className="text-[11px] text-gray-300 mt-3">PDF e imágenes → IA de Gemini las interpreta automáticamente</p>
-                <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp,.gif,.heic" className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                <p className="text-[11px] text-gray-300 mt-3">Podés soltar varios archivos a la vez · PDF de imágenes → extrae las fotos automáticamente</p>
+                <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,.jpg,.jpeg,.png,.webp,.gif,.heic" multiple className="hidden"
+                  onChange={e => { const fs = e.target.files; if (fs?.length) void handleFiles(Array.from(fs)); }} />
               </div>
               <div className="grid grid-cols-3 gap-3 max-w-lg w-full text-[11px] text-center">
                 {[
@@ -1789,6 +1951,7 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                 <table className="w-full text-[11px] border-collapse">
                   <thead className="sticky top-0 bg-white border-b border-gray-200 z-10">
                     <tr>
+                      {photoCount > 0 && <th className="px-2 py-2 w-12" />}
                       <th className="text-left px-3 py-2 text-[9px] font-semibold text-gray-400 uppercase w-28">Categoría</th>
                       <th className="text-left px-3 py-2 text-[9px] font-semibold text-gray-400 uppercase w-24">Código</th>
                       <th className="text-left px-3 py-2 text-[9px] font-semibold text-gray-400 uppercase">Descripción</th>
@@ -1806,6 +1969,22 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                       const priceDiff = item.acquaCost && arsPrice ? arsPrice - item.acquaCost : null;
                       return (
                         <tr key={item.id} className={cn('border-b border-gray-50 hover:bg-gray-50/70 transition-colors', item.inAcqua && 'bg-green-50/20')}>
+                          {photoCount > 0 && (
+                            <td className="px-2 py-1">
+                              {photoMap[item.code] ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={photoMap[item.code]}
+                                  alt={item.desc}
+                                  className="w-9 h-9 object-contain rounded border border-gray-100 bg-gray-50"
+                                />
+                              ) : (
+                                <div className="w-9 h-9 rounded border border-gray-100 bg-gray-50 flex items-center justify-center text-[9px] text-gray-300">
+                                  <ImageIcon className="w-4 h-4" />
+                                </div>
+                              )}
+                            </td>
+                          )}
                           <td className="px-3 py-1.5"><span className="text-[9px] text-gray-400 truncate block max-w-[110px]" title={item.category}>{item.category}</span></td>
                           <td className="px-3 py-1.5">
                             <div className="flex items-center gap-1">
@@ -1895,8 +2074,8 @@ function SupplierCatalogModal({ onClose, supplierName, geminiKey, supplierProduc
                         </tr>
                       );
                     })}
-                    {filtered.length > 700 && <tr><td colSpan={9} className="px-3 py-3 text-center text-[11px] text-gray-400">Mostrando 700 de {filtered.length}. Usá filtros o exportá el CSV.</td></tr>}
-                    {filtered.length === 0 && <tr><td colSpan={9} className="px-3 py-12 text-center text-[12px] text-gray-400">Sin resultados</td></tr>}
+                    {filtered.length > 700 && <tr><td colSpan={photoCount > 0 ? 10 : 9} className="px-3 py-3 text-center text-[11px] text-gray-400">Mostrando 700 de {filtered.length}. Usá filtros o exportá el CSV.</td></tr>}
+                    {filtered.length === 0 && <tr><td colSpan={photoCount > 0 ? 10 : 9} className="px-3 py-12 text-center text-[12px] text-gray-400">Sin resultados</td></tr>}
                   </tbody>
                 </table>
               </div>
