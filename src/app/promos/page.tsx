@@ -9,8 +9,9 @@ import {
   RotateCcw, TrendingUp, Heart, Zap, Calendar,
   Gift, Percent, ShoppingCart, Package,
   Upload, Image as ImageIcon, MessageCircle,
-  Plus, Minus, Tag, Star,
+  Plus, Minus, Tag, Star, BookmarkPlus, BookOpen, Trash2, RefreshCw,
 } from 'lucide-react';
+import type { SavedPromo } from '@/app/api/promos/route';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -40,6 +41,67 @@ function resolveImg(p: Product): string | null {
   if (p.image) return p.image;
   if (p.odooId) return `${ODOO_BASE}/web/image/product.template/${p.odooId}/image_1920`;
   return null;
+}
+
+/**
+ * Elimina el fondo blanco/casi-blanco de una imagen usando flood-fill desde
+ * los bordes. Devuelve un canvas con fondo transparente.
+ * threshold: cuán "blanco" tiene que ser el pixel para ser removido (0-255).
+ */
+function removeWhiteBg(img: HTMLImageElement, threshold = 32): HTMLCanvasElement {
+  const MAX = 700; // escalar para performance
+  const sc  = Math.min(1, MAX / Math.max(img.width, img.height));
+  const W   = Math.max(1, Math.round(img.width  * sc));
+  const H   = Math.max(1, Math.round(img.height * sc));
+
+  const oc   = document.createElement('canvas');
+  oc.width   = W; oc.height = H;
+  const octx = oc.getContext('2d')!;
+  octx.drawImage(img, 0, 0, W, H);
+
+  const id = octx.getImageData(0, 0, W, H);
+  const d  = id.data;
+
+  const nearWhite = (i: number) =>
+    d[i] > 255 - threshold && d[i+1] > 255 - threshold && d[i+2] > 255 - threshold;
+
+  const vis = new Uint8Array(W * H);
+  const q: number[] = [];
+
+  const seed = (x: number, y: number) => {
+    const pi = y * W + x;
+    if (!vis[pi] && nearWhite(pi * 4)) { vis[pi] = 1; q.push(pi); }
+  };
+
+  // Sembrar desde todos los bordes
+  for (let x = 0; x < W; x++) { seed(x, 0); seed(x, H - 1); }
+  for (let y = 0; y < H; y++) { seed(0, y); seed(W - 1, y); }
+
+  // BFS flood fill
+  while (q.length) {
+    const pi = q.pop()!;
+    d[pi * 4 + 3] = 0; // transparente
+    const x = pi % W, y = (pi / W) | 0;
+    if (x > 0   && !vis[pi-1] && nearWhite((pi-1)*4)) { vis[pi-1]=1; q.push(pi-1); }
+    if (x < W-1 && !vis[pi+1] && nearWhite((pi+1)*4)) { vis[pi+1]=1; q.push(pi+1); }
+    if (y > 0   && !vis[pi-W] && nearWhite((pi-W)*4)) { vis[pi-W]=1; q.push(pi-W); }
+    if (y < H-1 && !vis[pi+W] && nearWhite((pi+W)*4)) { vis[pi+W]=1; q.push(pi+W); }
+  }
+
+  // Suavizar bordes (feather 1px)
+  for (let pi = 0; pi < W * H; pi++) {
+    if (d[pi*4+3] === 0) continue;
+    const x = pi % W, y = (pi / W) | 0;
+    const hasTranspNbr =
+      (x > 0   && d[(pi-1)*4+3] === 0) ||
+      (x < W-1 && d[(pi+1)*4+3] === 0) ||
+      (y > 0   && d[(pi-W)*4+3] === 0) ||
+      (y < H-1 && d[(pi+W)*4+3] === 0);
+    if (hasTranspNbr) d[pi*4+3] = 160; // semi-transparente en el borde
+  }
+
+  octx.putImageData(id, 0, 0);
+  return oc;
 }
 
 function formatARS(n: number) {
@@ -200,313 +262,486 @@ function usePromoCanvas(
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctxRaw = canvas.getContext('2d');
-    if (!ctxRaw) return;
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const ctx = ctxRaw!;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const SIZE = 1080;
-    canvas.width = SIZE;
-    canvas.height = SIZE;
+    const S = 1080;
+    canvas.width  = S;
+    canvas.height = S;
 
     // ── Palette ──────────────────────────────────────────────────────────────
-    const isLight  = bg === 'blanco';
-    const isDark   = bg === 'oscuro';
-    const isColour = !isLight; // coloured or dark bg
-    const ink      = isLight ? '#07111F' : '#FFFFFF';
-    const inkSub   = isLight ? '#6B7280' : 'rgba(255,255,255,0.55)';
-    const accent   = isLight ? '#0784F2' : (isDark ? '#fbbf24' : '#FFFFFF');
+    type Pal = { bgFill:string; panelFill:string; ink:string; sub:string; acc:string; accInk:string };
+    const PALS: Record<BgOption,Pal> = {
+      blanco:  { bgFill:'#F5F4F0', panelFill:'#07111F',            ink:'#07111F', sub:'#6B7280',              acc:'#0784F2', accInk:'#FFFFFF' },
+      azul:    { bgFill:'#0784F2', panelFill:'#04276e',            ink:'#FFFFFF', sub:'rgba(255,255,255,.65)', acc:'#FFE600', accInk:'#07111F' },
+      oscuro:  { bgFill:'#07111F', panelFill:'#0d1e33',            ink:'#FFFFFF', sub:'rgba(255,255,255,.55)', acc:'#0784F2', accInk:'#FFFFFF' },
+      verano:  { bgFill:'#F97316', panelFill:'#07111F',            ink:'#FFFFFF', sub:'rgba(255,255,255,.72)', acc:'#FFE600', accInk:'#07111F' },
+      violeta: { bgFill:'#6D28D9', panelFill:'#2D1058',            ink:'#FFFFFF', sub:'rgba(255,255,255,.65)', acc:'#FBBF24', accInk:'#07111F' },
+      custom:  { bgFill:'#07111F', panelFill:'rgba(0,0,0,.82)',    ink:'#FFFFFF', sub:'rgba(255,255,255,.65)', acc:'#0784F2', accInk:'#FFFFFF' },
+    };
+    const { bgFill, panelFill, ink, sub: inkSub, acc: accent, accInk } = PALS[bg] ?? PALS.blanco;
+    const isLight = bg === 'blanco';
 
-    // ── Background ───────────────────────────────────────────────────────────
+    // ── Layout constants ──────────────────────────────────────────────────────
+    const HDR  = 90;
+    const FTR  = 72;
+    const CTOP = HDR;
+    const CBOT = S - FTR;
+
+    const mainItems = items.filter(i => !i.isGift);
+    const giftItems = items.filter(i =>  i.isGift);
+    const count = mainItems.length;
+
+    // ── Image loader con remoción de fondo blanco ─────────────────────────────
+    // Devuelve CanvasImageSource (canvas con bg removido, o imagen original si CORS falla)
+    const loadImg = (src: string | null, cb: (img: CanvasImageSource | null) => void) => {
+      if (!src) { cb(null); return; }
+      const isData = src.startsWith('data:');
+      const img = new Image();
+      if (!isData) img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          cb(removeWhiteBg(img)); // CORS OK → removemos fondo
+        } catch {
+          cb(img); // CORS tainted → sin remoción, igual se muestra
+        }
+      };
+      img.onerror = () => {
+        if (!isData) {
+          // Retry sin CORS (canvas tainted, sin bg removal)
+          const img2 = new Image();
+          img2.onload  = () => cb(img2);
+          img2.onerror = () => cb(null);
+          img2.src = src;
+        } else cb(null);
+      };
+      img.src = src;
+    };
+
+    // ── Text wrap helper ──────────────────────────────────────────────────────
+    const wrapLines = (text: string, maxW: number, maxL = 3): string[] => {
+      const words = text.split(' ');
+      const lines: string[] = [];
+      let cur = '';
+      for (const w of words) {
+        const test = cur ? cur + ' ' + w : w;
+        if (cur && ctx.measureText(test).width > maxW) {
+          lines.push(cur); cur = w;
+          if (lines.length >= maxL) { lines[lines.length - 1] += '…'; return lines; }
+        } else cur = test;
+      }
+      if (cur) lines.push(cur);
+      return lines.slice(0, maxL);
+    };
+    const fillLines = (lines: string[], cx: number, y: number, lh: number) =>
+      lines.forEach((l, i) => ctx.fillText(l, cx, y + i * lh));
+
+    // ── Background ────────────────────────────────────────────────────────────
     const paintBg = (then: () => void) => {
       if (bg === 'custom' && customBg) {
         const bi = new Image();
-        bi.onload = () => { ctx.drawImage(bi, 0, 0, SIZE, SIZE); then(); };
-        bi.onerror = then;
-        bi.src = customBg;
-        return;
+        bi.onload  = () => { ctx.drawImage(bi, 0, 0, S, S); then(); };
+        bi.onerror = () => { ctx.fillStyle = bgFill; ctx.fillRect(0, 0, S, S); then(); };
+        bi.src = customBg; return;
       }
-      if (bg === 'blanco') {
-        ctx.fillStyle = '#F5F5F3';
-      } else if (bg === 'azul') {
-        ctx.fillStyle = '#0784F2';
-      } else if (bg === 'oscuro') {
-        ctx.fillStyle = '#07111F';
-      } else if (bg === 'verano') {
-        const g = ctx.createLinearGradient(0, SIZE, SIZE, 0);
-        g.addColorStop(0,'#F97316'); g.addColorStop(1,'#FBBF24');
+      if (bg === 'verano') {
+        const g = ctx.createLinearGradient(0, S, S, 0);
+        g.addColorStop(0, '#F97316'); g.addColorStop(1, '#FBBF24');
         ctx.fillStyle = g;
       } else if (bg === 'violeta') {
-        const g = ctx.createLinearGradient(0, 0, SIZE, SIZE);
-        g.addColorStop(0,'#7C3AED'); g.addColorStop(1,'#EC4899');
+        const g = ctx.createLinearGradient(0, 0, S, S);
+        g.addColorStop(0, '#7C3AED'); g.addColorStop(1, '#4F46E5');
         ctx.fillStyle = g;
-      } else { ctx.fillStyle = '#F5F5F3'; }
-      ctx.fillRect(0, 0, SIZE, SIZE);
+      } else {
+        ctx.fillStyle = bgFill;
+      }
+      ctx.fillRect(0, 0, S, S);
       then();
     };
 
-    paintBg(() => {
-      ctx.textAlign = 'center';
+    // ── Header ────────────────────────────────────────────────────────────────
+    const drawHeader = () => {
+      ctx.fillStyle = isLight ? 'rgba(0,0,0,0.025)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(0, 0, S, HDR);
 
-      // ── 0. Decorative circles (ACQUA branding) ───────────────────────────
-      const decoCircles: [number, number, number, number][] = [
-        [-100, -100, 280, isLight ? 0.07 : 0.09],
-        [SIZE + 110, SIZE * 0.17, 310, isLight ? 0.05 : 0.07],
-        [SIZE * 0.12, SIZE + 110, 270, isLight ? 0.05 : 0.07],
-        [SIZE * 0.85, SIZE * 0.52, 180, isLight ? 0.04 : 0.05],
-      ];
-      decoCircles.forEach(([cx2, cy2, r, a]) => {
-        ctx.save(); ctx.globalAlpha = a;
-        ctx.fillStyle = isLight ? '#0784F2' : '#FFFFFF';
-        ctx.beginPath(); ctx.arc(cx2, cy2, r, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-      });
-
-      // Sparkle stars
-      const sparkles: [number, number, number][] = [
-        [148, 180, 10], [956, 144, 9], [66, 458, 8],
-        [1014, 554, 10], [198, 928, 9], [882, 874, 8],
-      ];
-      sparkles.forEach(([sx, sy, sr]) => {
-        ctx.save(); ctx.globalAlpha = 0.24;
-        ctx.fillStyle = isLight ? '#0784F2' : '#FFFFFF';
-        ctx.beginPath();
-        for (let k = 0; k < 8; k++) {
-          const ang = k * Math.PI / 4 - Math.PI / 8;
-          const rad = k % 2 === 0 ? sr : sr * 0.38;
-          const spx = sx + Math.cos(ang) * rad;
-          const spy = sy + Math.sin(ang) * rad;
-          k === 0 ? ctx.moveTo(spx, spy) : ctx.lineTo(spx, spy);
-        }
-        ctx.closePath(); ctx.fill(); ctx.restore();
-      });
-
-      // ── 1. Brand header ──────────────────────────────────────────────────
-      ctx.fillStyle = isLight ? 'rgba(0,0,0,0.03)' : 'rgba(255,255,255,0.07)';
-      ctx.fillRect(0, 0, SIZE, 94);
-
-      // Icon box
       ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+      ctx.shadowColor = 'rgba(0,0,0,0.22)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 3;
       ctx.fillStyle = accent;
-      ctx.beginPath(); ctx.roundRect(42, 17, 60, 60, 14); ctx.fill();
+      ctx.beginPath(); ctx.roundRect(38, 15, 62, 62, 14); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = isLight ? '#FFFFFF' : '#07111F';
-      ctx.font = 'bold 26px system-ui'; ctx.textAlign = 'center';
-      ctx.fillText('AP', 72, 55);
+      ctx.fillStyle = accInk; ctx.font = 'bold 27px Arial, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('AP', 69, 55);
 
-      // Brand text
       ctx.textAlign = 'left';
-      ctx.fillStyle = ink; ctx.font = '800 28px system-ui';
-      ctx.fillText('ACQUA', 118, 44);
-      ctx.fillStyle = inkSub; ctx.font = '500 15px system-ui';
-      ctx.fillText('PACHECO  ·  Limpieza y Hogar', 120, 67);
+      ctx.fillStyle = ink;  ctx.font = '800 30px Arial, sans-serif'; ctx.fillText('ACQUA', 118, 47);
+      ctx.fillStyle = inkSub; ctx.font = '500 15px Arial, sans-serif';
+      ctx.fillText('PACHECO  ·  Limpieza y Hogar', 119, 70);
 
-      // Divider
-      ctx.strokeStyle = isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.14)';
+      // Promo pill top-right
+      const pLabel = tipo === '2da_unidad' ? '2DA UNIDAD'
+        : tipo === 'por_cantidad' ? `${param}% OFF CANTIDAD`
+        : tipo === 'descuento'    ? `${param}% DE DESCUENTO`
+        : tipo === 'combo'        ? 'COMBO ESPECIAL'
+        : tipo === 'regalo'       ? '+ REGALO INCLUIDO'
+        : 'OFERTA ESPECIAL';
+      ctx.font = 'bold 18px Arial, sans-serif';
+      const pw = ctx.measureText(pLabel).width + 44;
+      const ph = 42; const px = S - 38 - pw; const py = (HDR - ph) / 2;
+      ctx.fillStyle = accent;
+      ctx.beginPath(); ctx.roundRect(px, py, pw, ph, ph / 2); ctx.fill();
+      ctx.fillStyle = accInk; ctx.textAlign = 'center';
+      ctx.fillText(pLabel, px + pw / 2, py + ph / 2 + 6.5);
+
+      ctx.strokeStyle = isLight ? 'rgba(0,0,0,0.07)' : 'rgba(255,255,255,0.10)';
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(42, 93); ctx.lineTo(SIZE - 42, 93); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(38, HDR - 1); ctx.lineTo(S - 38, HDR - 1); ctx.stroke();
+    };
 
-      // ── 2. Offer pill ────────────────────────────────────────────────────
-      ctx.textAlign = 'center';
-      const pillLabel =
-        tipo === '2da_unidad'   ? '2DA UNIDAD'
-        : tipo === 'por_cantidad' ? 'OFERTA POR CANTIDAD'
-        : tipo === 'descuento'    ? 'DESCUENTO ESPECIAL'
-        : tipo === 'combo'        ? 'COMBO PRECIO ÚNICO'
-        : tipo === 'regalo'       ? 'REGALO INCLUIDO'
-        :                           'OFERTA ESPECIAL';
+    // ── Footer ────────────────────────────────────────────────────────────────
+    const drawFooter = () => {
+      ctx.fillStyle = isLight ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.06)';
+      ctx.fillRect(0, CBOT, S, FTR);
+      ctx.fillStyle = inkSub; ctx.font = '500 17px Arial, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('Acqua Pacheco  ·  @acquapacheco  ·  acquapacheco.com.ar', S / 2, CBOT + 42);
+    };
 
-      ctx.font = 'bold 17px system-ui';
-      const pillW = ctx.measureText(pillLabel).width + 58;
-      const pillH = 42; const pillX = SIZE / 2 - pillW / 2; const pillY = 108;
-      ctx.fillStyle = isLight ? '#0784F2' : 'rgba(255,255,255,0.20)';
-      ctx.beginPath(); ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2); ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillText(pillLabel, SIZE / 2, pillY + 28.5);
+    paintBg(() => {
+      drawHeader();
 
-      // ── 3. Offer headline — bold, legible, no editorial spacing ──────────
-      const mainItems = items.filter(i => !i.isGift);
-      const giftItems = items.filter(i =>  i.isGift);
+      // ════════════════════════════════════════════════════════════════════════
+      // SINGLE PRODUCT — Split + price breakdown below
+      // ════════════════════════════════════════════════════════════════════════
+      if (count <= 1) {
+        const qty = mainItems[0]?.qty ?? 1;
 
-      let offerL1 = '', offerL2 = '', hSz = 82;
-      if (tipo === '2da_unidad') {
-        offerL1 = `¡2DA UNIDAD`; offerL2 = `AL ${param}% OFF!`; hSz = 82;
-      } else if (tipo === 'por_cantidad') {
-        offerL1 = `¡${param}% OFF`; offerL2 = `POR CANTIDAD!`; hSz = 82;
-      } else if (tipo === 'descuento') {
-        offerL1 = `¡${param}%`; offerL2 = `DE DESCUENTO!`; hSz = 96;
-      } else if (tipo === 'combo') {
-        offerL1 = promoName ? promoName.toUpperCase() : 'COMBO'; offerL2 = '¡PRECIO ESPECIAL!'; hSz = 68;
-      } else if (tipo === 'regalo') {
-        offerL1 = '¡CON TU COMPRA'; offerL2 = 'UN REGALO!'; hSz = 76;
-      }
+        // Layout zones
+        const PANEL_BOT  = 740;   // where the split panel ends
+        const PRICE_TOP  = PANEL_BOT + 8;
+        const PRICE_H    = 195;   // 3-column price section
+        const PAY_TOP    = PRICE_TOP + PRICE_H;
+        const PAY_H      = CBOT - PAY_TOP;
 
-      const hBase = pillY + pillH + 16;
+        const SPLIT = 580;
+        const SLOPE = 78;
 
-      ctx.save();
-      ctx.shadowColor = isDark ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.10)';
-      ctx.shadowBlur = 10; ctx.shadowOffsetY = 4;
-      ctx.fillStyle = ink; ctx.font = `900 ${hSz}px system-ui`;
-      ctx.fillText(offerL1, SIZE / 2, hBase + hSz * 0.90);
-      ctx.restore();
-
-      ctx.fillStyle = accent; ctx.font = `900 ${hSz}px system-ui`;
-      ctx.fillText(offerL2, SIZE / 2, hBase + hSz * 1.96);
-
-      // ── 4. Products — big, centered, with elliptical shadow ──────────────
-      const PROD_TOP = hBase + hSz * 2.14 + 22;
-      const PROD_BOT = 742;
-      const PROD_H   = Math.max(PROD_BOT - PROD_TOP, 160);
-      const count    = mainItems.length;
-      const PAD      = 46; const gap = 22;
-      const totW     = SIZE - PAD * 2;
-
-      type Rect = { x: number; y: number; w: number; h: number };
-      const slots: Rect[] = [];
-      if (count === 1) {
-        const w = totW * 0.62;
-        slots.push({ x: SIZE / 2 - w / 2, y: PROD_TOP, w, h: PROD_H });
-      } else if (count === 2) {
-        const w = (totW - gap) / 2;
-        slots.push({ x: PAD,           y: PROD_TOP, w, h: PROD_H });
-        slots.push({ x: PAD + w + gap, y: PROD_TOP, w, h: PROD_H });
-      } else if (count === 3) {
-        const w = (totW - gap * 2) / 3;
-        [0, 1, 2].forEach(k => slots.push({ x: PAD + k * (w + gap), y: PROD_TOP, w, h: PROD_H }));
-      } else {
-        const w = (totW - gap) / 2, h = (PROD_H - gap) / 2;
-        [[0,0],[1,0],[0,1],[1,1]].forEach(([xi, yi]) =>
-          slots.push({ x: PAD + xi * (w + gap), y: PROD_TOP + yi * (h + gap), w, h }));
-      }
-
-      // Elliptical shadow under each product (stage effect)
-      const drawStage = (slot: Rect) => {
-        const ex = slot.x + slot.w / 2, ey = slot.y + slot.h;
+        // Right accent panel (only reaches PANEL_BOT)
         ctx.save();
-        const sg = ctx.createRadialGradient(ex, ey, 0, ex, ey, slot.w * 0.44);
-        sg.addColorStop(0, 'rgba(0,0,0,0.28)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = sg;
-        ctx.beginPath(); ctx.ellipse(ex, ey, slot.w * 0.44, 18, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 44; ctx.shadowOffsetX = -10;
+        ctx.fillStyle = panelFill;
+        ctx.beginPath();
+        ctx.moveTo(SPLIT - SLOPE / 2, CTOP);
+        ctx.lineTo(SPLIT + SLOPE / 2, PANEL_BOT);
+        ctx.lineTo(S, PANEL_BOT);
+        ctx.lineTo(S, CTOP);
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
-      };
 
-      const drawPName = (slot: Rect, name: string) => {
-        ctx.fillStyle = inkSub; ctx.textAlign = 'center';
-        ctx.font = `600 ${count > 2 ? 14 : 17}px system-ui`;
-        const s = name.length > 28 ? name.substring(0, 26) + '…' : name;
-        ctx.fillText(s, slot.x + slot.w / 2, slot.y + slot.h + 30);
-      };
+        // ── RIGHT PANEL TEXT ──────────────────────────────────────────────
+        const RPX = SPLIT + 55;
+        const RPW = S - RPX - 36;
+        const RCX = RPX + RPW / 2;
 
-      let loaded = 0;
-      const onLoad = () => { loaded++; if (loaded >= mainItems.length) drawBottom(); };
-      if (mainItems.length === 0) { drawBottom(); return; }
-
-      mainItems.forEach((item, i) => {
-        const slot = slots[i];
-        if (!slot) return;
-        drawStage(slot);
-        const imgMaxH = slot.h - 18, imgMaxW = slot.w - 14;
-        if (item.product.image) {
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            const scale = Math.min(imgMaxW / img.width, imgMaxH / img.height);
-            const dw = img.width * scale, dh = img.height * scale;
-            const dx = slot.x + (slot.w - dw) / 2;
-            const dy = slot.y + (imgMaxH - dh) / 2 + 6;
-            ctx.drawImage(img, dx, dy, dw, dh);
-            if (item.qty > 1) {
-              ctx.fillStyle = accent;
-              ctx.beginPath(); ctx.arc(dx + dw + 16, dy, 22, 0, Math.PI * 2); ctx.fill();
-              ctx.fillStyle = isLight ? '#FFF' : '#07111F';
-              ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
-              ctx.fillText(`×${item.qty}`, dx + dw + 16, dy + 5.5);
-            }
-            drawPName(slot, item.product.name); onLoad();
-          };
-          img.onerror = () => { drawPName(slot, item.product.name); onLoad(); };
-          img.src = item.product.image;
-        } else {
-          ctx.fillStyle = isLight ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.10)';
-          ctx.beginPath(); ctx.roundRect(slot.x + 22, slot.y + 8, slot.w - 44, imgMaxH - 8, 16); ctx.fill();
-          ctx.fillStyle = inkSub; ctx.font = `500 ${count > 2 ? 13 : 16}px system-ui`; ctx.textAlign = 'center';
-          const s2 = item.product.name.length > 22 ? item.product.name.substring(0, 20) + '…' : item.product.name;
-          ctx.fillText(s2, slot.x + slot.w / 2, slot.y + imgMaxH / 2 + 8);
-          drawPName(slot, item.product.name); onLoad();
+        // Product name (top of panel, prominent)
+        if (mainItems[0]) {
+          ctx.fillStyle = inkSub; ctx.font = '700 24px Arial, sans-serif'; ctx.textAlign = 'center';
+          fillLines(wrapLines(mainItems[0].product.name.toUpperCase(), RPW - 8, 2), RCX, CTOP + 50, 30);
         }
-        if (giftItems.length > 0 && i === mainItems.length - 1) {
-          ctx.fillStyle = '#16A34A'; ctx.font = 'bold 16px system-ui'; ctx.textAlign = 'center';
-          ctx.fillText(`🎁 + ${giftItems[0].product.name.substring(0, 24)}`, SIZE / 2, slot.y + slot.h + 56);
-        }
-      });
 
-      // ── 5. Price badge + footer ───────────────────────────────────────────
-      function drawBottom() {
+        // Offer headline (% / 2DA UNIDAD / etc.)
+        let h1 = '', h2 = ''; let s1 = 110, s2 = 90;
+        if      (tipo === '2da_unidad')    { h1 = '2DA';        h2 = 'UNIDAD OFF';   s1 = 86;  s2 = 72; }
+        else if (tipo === 'por_cantidad')  { h1 = `${param}%`;  h2 = 'OFF';          s1 = 130; s2 = 110; }
+        else if (tipo === 'descuento')     { h1 = `${param}%`;  h2 = 'DESCUENTO';    s1 = 130; s2 = 68; }
+        else if (tipo === 'combo')         { h1 = promoName?.toUpperCase().slice(0,10) || 'COMBO'; h2 = '¡ESPECIAL!'; s1 = 72; s2 = 60; }
+        else if (tipo === 'regalo')        { h1 = '+¡UN';       h2 = 'REGALO!';      s1 = 86;  s2 = 88; }
+
+        const H1Y = CTOP + 110;
         ctx.textAlign = 'center';
+        ctx.fillStyle = ink;    ctx.font = `900 ${s1}px Arial Black, Impact, sans-serif`;
+        ctx.fillText(h1, RCX, H1Y + s1 * 0.86);
+        ctx.fillStyle = accent; ctx.font = `900 ${s2}px Arial Black, Impact, sans-serif`;
+        ctx.fillText(h2, RCX, H1Y + s1 + s2 * 0.86 + 8);
 
-        // Promo name above badge (if set, non-combo)
-        const showName = promoName && tipo !== 'combo';
-        if (showName) {
-          ctx.fillStyle = ink; ctx.font = 'bold 26px system-ui';
-          ctx.fillText(promoName.toUpperCase(), SIZE / 2, 776);
+        // Urgency line (for por_cantidad / 2da_unidad)
+        if (tipo === 'por_cantidad' || tipo === '2da_unidad') {
+          const urgY = H1Y + s1 + s2 + 52;
+          ctx.fillStyle = inkSub; ctx.font = '600 20px Arial, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText('¡MÁS CANTIDAD, MÁS AHORRO!', RCX, urgY);
         }
 
-        const BY  = showName ? 796 : 782;
-        const bW  = SIZE - 88;
-        const bH  = savings > 0 ? 164 : 130;
-        const bX  = SIZE / 2 - bW / 2;
+        // % OFF circle badge at the split junction (mid-height of panel)
+        if (savings > 0 && savingsPct > 0) {
+          const bX = SPLIT + 12, bY = CTOP + (PANEL_BOT - CTOP) * 0.72;
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.40)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+          ctx.fillStyle = '#E53E3E';
+          ctx.beginPath(); ctx.arc(bX, bY, 66, 0, Math.PI * 2); ctx.fill();
+          ctx.restore();
+          ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center';
+          ctx.font = '900 36px Arial Black, sans-serif';
+          ctx.fillText(`${Math.round(savingsPct)}%`, bX, bY - 4);
+          ctx.font = '800 22px Arial, sans-serif';
+          ctx.fillText('OFF', bX, bY + 24);
+        }
 
-        // Badge with shadow
+        // ── 3-COLUMN PRICE SECTION ────────────────────────────────────────
+        // Full-width dark band
+        ctx.fillStyle = panelFill;
+        ctx.fillRect(0, PRICE_TOP, S, PRICE_H);
+
+        const col = S / 3;
+        const priceInk    = isLight ? '#FFFFFF' : '#FFFFFF';
+        const priceSubInk = 'rgba(255,255,255,0.55)';
+        const colCenters  = [col * 0.5, col * 1.5, col * 2.5];
+
+        // Column dividers
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1;
+        [col, col * 2].forEach(x => {
+          ctx.beginPath(); ctx.moveTo(x, PRICE_TOP + 20); ctx.lineTo(x, PRICE_TOP + PRICE_H - 20); ctx.stroke();
+        });
+
+        // Col 1: PRECIO REGULAR
+        ctx.textAlign = 'center';
+        ctx.fillStyle = priceSubInk; ctx.font = '700 16px Arial, sans-serif';
+        ctx.fillText('PRECIO REGULAR', colCenters[0], PRICE_TOP + 36);
+        if (savings > 0) {
+          const regPrice = formatARS(promoPrice + savings);
+          ctx.fillStyle = priceSubInk; ctx.font = '600 28px Arial, sans-serif';
+          ctx.fillText(regPrice, colCenters[0], PRICE_TOP + 76);
+          // Strikethrough
+          const rw = ctx.measureText(regPrice).width;
+          ctx.strokeStyle = priceSubInk; ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(colCenters[0] - rw/2, PRICE_TOP + 63);
+          ctx.lineTo(colCenters[0] + rw/2, PRICE_TOP + 63);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = priceInk; ctx.font = '600 28px Arial, sans-serif';
+          ctx.fillText(formatARS(promoPrice), colCenters[0], PRICE_TOP + 76);
+        }
+        ctx.fillStyle = priceSubInk; ctx.font = '500 14px Arial, sans-serif';
+        ctx.fillText('precio de lista', colCenters[0], PRICE_TOP + 100);
+
+        // Col 2: AHORRAS (only if savings > 0)
+        if (savings > 0) {
+          ctx.fillStyle = '#FCD34D'; ctx.font = '800 16px Arial, sans-serif';
+          ctx.fillText('AHORRAS', colCenters[1], PRICE_TOP + 36);
+          ctx.fillStyle = '#FCD34D'; ctx.font = `900 ${savings >= 10000 ? 44 : 52}px Arial Black, sans-serif`;
+          ctx.fillText(formatARS(savings), colCenters[1], PRICE_TOP + 90);
+          ctx.fillStyle = priceSubInk; ctx.font = '500 14px Arial, sans-serif';
+          ctx.fillText(`${Math.round(savingsPct)}% de descuento`, colCenters[1], PRICE_TOP + 116);
+        } else {
+          ctx.fillStyle = priceSubInk; ctx.font = '700 16px Arial, sans-serif';
+          ctx.fillText('PRECIO ÚNICO', colCenters[1], PRICE_TOP + 36);
+          ctx.fillStyle = priceInk; ctx.font = '600 20px Arial, sans-serif';
+          ctx.fillText('Cualquier medio', colCenters[1], PRICE_TOP + 72);
+          ctx.fillText('de pago', colCenters[1], PRICE_TOP + 98);
+        }
+
+        // Col 3: PRECIO PROMO
+        ctx.fillStyle = accent; ctx.font = '800 16px Arial, sans-serif';
+        ctx.fillText('PRECIO PROMO', colCenters[2], PRICE_TOP + 36);
+        ctx.fillStyle = accent; ctx.font = `900 ${promoPrice >= 100000 ? 40 : promoPrice >= 10000 ? 48 : 54}px Arial Black, sans-serif`;
+        ctx.fillText(formatARS(promoPrice), colCenters[2], PRICE_TOP + 92);
+        if (qty > 1) {
+          const perUnit = Math.round(promoPrice / qty);
+          ctx.fillStyle = priceInk; ctx.font = '700 18px Arial, sans-serif';
+          ctx.fillText(`${formatARS(perUnit)} c/u`, colCenters[2], PRICE_TOP + 120);
+        }
+
+        // ── PAYMENT BAR ───────────────────────────────────────────────────
+        ctx.fillStyle = isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.06)';
+        ctx.fillRect(0, PAY_TOP, S, PAY_H);
+        ctx.fillStyle = inkSub; ctx.font = '600 16px Arial, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('PRECIO ÚNICO  ·  MERCADO PAGO  ·  VISA  ·  MASTERCARD  ·  DÉBITO  ·  EFECTIVO', S/2, PAY_TOP + PAY_H/2 + 6);
+
+        // ── PRODUCT HERO IMAGE(S) ─────────────────────────────────────────
+        // Drawn LAST so they overlap the panel and price section
+        const imgSlot = { x: 14, y: CTOP + 4, w: SPLIT + 50, h: PANEL_BOT - CTOP };
+        const drawHero = (img: CanvasImageSource | null) => {
+          if (img) {
+            const iw = (img as HTMLImageElement).naturalWidth  || (img as HTMLCanvasElement).width  || 1;
+            const ih = (img as HTMLImageElement).naturalHeight || (img as HTMLCanvasElement).height || 1;
+
+            if (qty >= 2) {
+              // Show 2 overlapping instances (back then front)
+              const sc2 = Math.min(imgSlot.w / iw, imgSlot.h / ih) * 0.70;
+              const dw = iw * sc2, dh = ih * sc2;
+              const cx = imgSlot.x + imgSlot.w / 2;
+              const cy = imgSlot.y + imgSlot.h / 2 + 10;
+
+              // Back unit (left, slightly up)
+              ctx.save();
+              ctx.shadowColor = 'rgba(0,0,0,0.30)'; ctx.shadowBlur = 30;
+              ctx.shadowOffsetX = 6; ctx.shadowOffsetY = 14;
+              ctx.globalAlpha = 0.92;
+              ctx.drawImage(img, cx - dw * 0.68, cy - dh / 2, dw, dh);
+              ctx.restore();
+
+              // Front unit (right, slightly forward)
+              ctx.save();
+              ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 44;
+              ctx.shadowOffsetX = 18; ctx.shadowOffsetY = 24;
+              ctx.drawImage(img, cx - dw * 0.32, cy - dh / 2 + 18, dw, dh);
+              ctx.restore();
+            } else {
+              // Single unit, large hero
+              const sc2 = Math.min(imgSlot.w / iw, imgSlot.h / ih) * 0.86;
+              const dw = iw * sc2, dh = ih * sc2;
+              const dx = imgSlot.x + (imgSlot.w - dw) / 2;
+              const dy = imgSlot.y + (imgSlot.h - dh) / 2;
+              ctx.save();
+              ctx.shadowColor = 'rgba(0,0,0,0.42)'; ctx.shadowBlur = 55;
+              ctx.shadowOffsetX = 16; ctx.shadowOffsetY = 24;
+              ctx.drawImage(img, dx, dy, dw, dh);
+              ctx.restore();
+            }
+          } else {
+            ctx.fillStyle = isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.07)';
+            ctx.beginPath();
+            ctx.roundRect(imgSlot.x + 50, imgSlot.y + 50, imgSlot.w - 100, imgSlot.h - 100, 28);
+            ctx.fill();
+            if (mainItems[0]) {
+              ctx.fillStyle = inkSub; ctx.font = '700 26px Arial, sans-serif'; ctx.textAlign = 'center';
+              fillLines(wrapLines(mainItems[0].product.name, imgSlot.w - 120, 3),
+                imgSlot.x + imgSlot.w / 2, imgSlot.y + imgSlot.h / 2 - 20, 36);
+            }
+          }
+          drawFooter();
+        };
+
+        loadImg(mainItems[0] ? resolveImg(mainItems[0].product) : null,
+          (img) => drawHero(img));
+
+      // ════════════════════════════════════════════════════════════════════════
+      // MULTI-PRODUCT (2-4) — Grid + price banner
+      // ════════════════════════════════════════════════════════════════════════
+      } else {
+        const PAD = 44, GAP = 18;
+        const GRID_TOP = CTOP + 18;
+        const GRID_BOT = CBOT - 205;
+        const GH = GRID_BOT - GRID_TOP;
+        const totW = S - PAD * 2;
+
+        type Rect = { x:number; y:number; w:number; h:number };
+        const slots: Rect[] = [];
+        if (count === 2) {
+          const w = (totW - GAP) / 2;
+          slots.push({ x: PAD, y: GRID_TOP, w, h: GH });
+          slots.push({ x: PAD + w + GAP, y: GRID_TOP, w, h: GH });
+        } else if (count === 3) {
+          const w = (totW - GAP * 2) / 3;
+          [0, 1, 2].forEach(k => slots.push({ x: PAD + k * (w + GAP), y: GRID_TOP, w, h: GH }));
+        } else {
+          const w = (totW - GAP) / 2, h = (GH - GAP) / 2;
+          [[0,0],[1,0],[0,1],[1,1]].forEach(([xi,yi]) =>
+            slots.push({ x: PAD + xi*(w+GAP), y: GRID_TOP + yi*(h+GAP), w, h }));
+        }
+
+        // Price banner at bottom
+        const BNR_Y = GRID_BOT + 10;
+        const BNR_H = CBOT - BNR_Y - 8;
         ctx.save();
-        ctx.shadowColor = 'rgba(0,0,0,0.28)'; ctx.shadowBlur = 32; ctx.shadowOffsetY = 12;
-        ctx.fillStyle = isLight ? '#07111F' : (isDark ? '#fbbf24' : 'rgba(255,255,255,0.22)');
-        ctx.beginPath(); ctx.roundRect(bX, BY, bW, bH, 30); ctx.fill();
+        ctx.shadowColor = 'rgba(0,0,0,0.32)'; ctx.shadowBlur = 28; ctx.shadowOffsetY = 8;
+        ctx.fillStyle = panelFill;
+        ctx.beginPath(); ctx.roundRect(PAD, BNR_Y, S - PAD * 2, BNR_H, 24); ctx.fill();
         ctx.restore();
 
-        const priceC  = isLight ? '#FFFFFF' : (isDark ? '#07111F' : '#07111F');
-        const priceSubC = isLight
-          ? 'rgba(255,255,255,0.55)'
-          : isDark ? 'rgba(7,17,31,0.50)' : 'rgba(0,0,0,0.38)';
-
-        // "Precio regular $X" with strikethrough
         if (savings > 0) {
-          const totalPriceLabel = `Precio regular: ${formatARS(promoPrice + savings)}`;
-          ctx.fillStyle = priceSubC; ctx.font = '500 23px system-ui'; ctx.textAlign = 'center';
-          ctx.fillText(totalPriceLabel, SIZE / 2 - 32, BY + 40);
-          const tlw = ctx.measureText(totalPriceLabel).width;
-          ctx.strokeStyle = priceSubC; ctx.lineWidth = 1.5;
+          const bef = `Antes: ${formatARS(promoPrice + savings)}`;
+          ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '500 22px Arial, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(bef, S/2 - 70, BNR_Y + 36);
+          const bw2 = ctx.measureText(bef).width;
+          ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(SIZE / 2 - 32 - tlw / 2, BY + 33);
-          ctx.lineTo(SIZE / 2 - 32 + tlw / 2, BY + 33);
+          ctx.moveTo(S/2 - 70 - bw2/2, BNR_Y + 26); ctx.lineTo(S/2 - 70 + bw2/2, BNR_Y + 26);
           ctx.stroke();
         }
+        const bPrSz = savings > 0 ? 76 : 84;
+        ctx.fillStyle = accent;
+        ctx.font = `900 ${bPrSz}px Arial Black, Impact, sans-serif`; ctx.textAlign = 'center';
+        ctx.fillText(formatARS(promoPrice), savings > 0 ? S/2 - 52 : S/2, BNR_Y + (savings > 0 ? 100 : 78));
 
-        // Main price — big and clear
-        const pY = savings > 0 ? BY + bH - 30 : BY + bH - 28;
-        const xOffset = savings > 0 ? -32 : 0;
-        ctx.fillStyle = priceC; ctx.font = '900 84px system-ui'; ctx.textAlign = 'center';
-        ctx.fillText(formatARS(promoPrice), SIZE / 2 + xOffset, pY);
-
-        // Savings circle badge (right side)
-        if (savings > 0) {
-          const scX = bX + bW - 44, scY = BY + bH / 2;
+        if (savings > 0 && savingsPct > 0) {
+          const scX = S - PAD - 58, scY = BNR_Y + BNR_H / 2;
           ctx.save();
-          ctx.shadowColor = 'rgba(0,0,0,0.20)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4;
-          ctx.fillStyle = '#16A34A';
-          ctx.beginPath(); ctx.arc(scX, scY, 46, 0, Math.PI * 2); ctx.fill();
+          ctx.shadowColor = 'rgba(0,0,0,0.28)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4;
+          ctx.fillStyle = '#E53E3E';
+          ctx.beginPath(); ctx.arc(scX, scY, 54, 0, Math.PI * 2); ctx.fill();
           ctx.restore();
-          ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 22px system-ui'; ctx.textAlign = 'center';
-          ctx.fillText(`${Math.round(savingsPct)}%`, scX, scY - 5);
-          ctx.font = '700 14px system-ui';
-          ctx.fillText('OFF', scX, scY + 16);
+          ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center';
+          ctx.font = '900 28px Arial Black, sans-serif';
+          ctx.fillText(`${Math.round(savingsPct)}%`, scX, scY - 4);
+          ctx.font = '800 18px Arial, sans-serif';
+          ctx.fillText('OFF', scX, scY + 18);
         }
 
-        // Footer strip
-        ctx.fillStyle = isLight ? 'rgba(0,0,0,0.045)' : 'rgba(255,255,255,0.07)';
-        ctx.fillRect(0, SIZE - 70, SIZE, 70);
-        ctx.fillStyle = inkSub; ctx.font = '17px system-ui'; ctx.textAlign = 'center';
-        ctx.fillText('Acqua Pacheco  ·  @acquapacheco  ·  acquapacheco.com.ar', SIZE / 2, SIZE - 26);
+        if (giftItems.length > 0) {
+          ctx.fillStyle = '#16A34A'; ctx.font = 'bold 18px Arial, sans-serif'; ctx.textAlign = 'center';
+          ctx.fillText(`🎁 + ${giftItems[0].product.name.slice(0, 28)}`, S/2, BNR_Y - 14);
+        }
+
+        // Draw products integrados (sin card, fondo transparente, juntos)
+        let loaded = 0;
+        const onLoadDone = () => { loaded++; if (loaded >= mainItems.length) drawFooter(); };
+        if (mainItems.length === 0) { drawFooter(); return; }
+
+        mainItems.forEach((item, i) => {
+          const slot = slots[i];
+          if (!slot) return;
+
+          // Product name label (debajo del slot)
+          ctx.fillStyle = inkSub; ctx.textAlign = 'center';
+          ctx.font = `700 ${count > 2 ? 15 : 19}px Arial, sans-serif`;
+          const sn = item.product.name.length > 24 ? item.product.name.slice(0,22)+'…' : item.product.name;
+          ctx.fillText(sn, slot.x + slot.w/2, slot.y + slot.h - 8);
+
+          loadImg(resolveImg(item.product), (img) => {
+            if (img) {
+              const iw = (img as HTMLImageElement).naturalWidth  || (img as HTMLCanvasElement).width  || 1;
+              const ih = (img as HTMLImageElement).naturalHeight || (img as HTMLCanvasElement).height || 1;
+              const mW = slot.w - 10, mH = slot.h - 38;
+              const sc2 = Math.min(mW / iw, mH / ih);
+              const dw = iw * sc2, dh = ih * sc2;
+              const dx = slot.x + (slot.w - dw)/2;
+              const dy = slot.y + (mH - dh)/2 + 4;
+
+              // Sombra suave debajo del producto
+              ctx.save();
+              const sg = ctx.createRadialGradient(
+                dx + dw/2, dy + dh, 0,
+                dx + dw/2, dy + dh, dw * 0.45
+              );
+              sg.addColorStop(0, 'rgba(0,0,0,0.28)');
+              sg.addColorStop(1, 'rgba(0,0,0,0)');
+              ctx.fillStyle = sg;
+              ctx.beginPath();
+              ctx.ellipse(dx + dw/2, dy + dh, dw * 0.45, 16, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+
+              ctx.save();
+              ctx.shadowColor = 'rgba(0,0,0,0.20)';
+              ctx.shadowBlur = 20; ctx.shadowOffsetY = 10;
+              ctx.drawImage(img, dx, dy, dw, dh);
+              ctx.restore();
+
+              if (item.qty > 1) {
+                ctx.fillStyle = accent;
+                ctx.beginPath(); ctx.arc(dx + dw - 4, dy + 18, 22, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = accInk; ctx.font = 'bold 14px Arial, sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText(`×${item.qty}`, dx + dw - 4, dy + 24);
+              }
+            } else {
+              // Placeholder sin card
+              ctx.fillStyle = inkSub; ctx.font = `500 ${count > 2 ? 13 : 16}px Arial, sans-serif`;
+              ctx.textAlign = 'center';
+              ctx.fillText(item.product.name.slice(0, 20), slot.x + slot.w/2, slot.y + slot.h/2);
+            }
+            onLoadDone();
+          });
+        });
       }
     });
   }, [items, bg, customBg, promoName, promoPrice, savings, savingsPct, tipo, step, param]);
@@ -655,8 +890,12 @@ export default function PromosPage() {
   const [copied,     setCopied]     = useState(false);
   const [promoMode,  setPromoMode]  = useState<PromoMode>('pct');
   const [fixedPrice, setFixedPrice] = useState<number>(0);
-  const [aiImgUrl,   setAiImgUrl]   = useState<string | null>(null);
-  const [aiLoading,  setAiLoading]  = useState(false);
+  const [aiImgUrl,     setAiImgUrl]     = useState<string | null>(null);
+  const [aiLoading,    setAiLoading]    = useState(false);
+  const [savedPromos,  setSavedPromos]  = useState<SavedPromo[]>([]);
+  const [showSaved,    setShowSaved]    = useState(false);
+  const [saving,       setSaving]       = useState(false);
+  const [savedToast,   setSavedToast]   = useState<string | null>(null);
 
   // Consultor de promos
   const [consultorOpen, setConsultorOpen] = useState(false);
@@ -683,6 +922,20 @@ export default function PromosPage() {
     if (!tipo || !objetivo || items.length === 0) return '';
     return socionRecomendacion(items, tipo, objetivo);
   }, [items, tipo, objetivo]);
+
+  // Cuántos combos puedo armar con el stock actual de cada componente
+  const combosDisponibles = useMemo(() => {
+    if (tipo !== 'combo') return null;
+    const mainItems = items.filter(i => !i.isGift);
+    if (mainItems.length === 0) return null;
+    let min = Infinity;
+    for (const item of mainItems) {
+      const prod = todosProductos.find(p => p.id === item.product.id);
+      const stock = (prod as { stock?: number })?.stock ?? 0;
+      min = Math.min(min, Math.floor(stock / item.qty));
+    }
+    return min === Infinity ? 0 : min;
+  }, [tipo, items]);
 
   // Canvas
   const canvasRef = usePromoCanvas(
@@ -813,6 +1066,7 @@ ${gifts ? '\n' + gifts + '\n' : ''}
     setAiLoading(true);
     setAiImgUrl(null);
     try {
+      const mainItems = items.filter(i => !i.isGift);
       const res = await fetch('/api/promo-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -820,21 +1074,105 @@ ${gifts ? '\n' + gifts + '\n' : ''}
           promoName:  promoName || 'PROMO ESPECIAL',
           tipo,
           objetivo,
-          productos:  items.filter(i => !i.isGift).map(i => i.product.name).slice(0, 4),
+          productos:  mainItems.map(i => `${i.qty > 1 ? i.qty + 'x ' : ''}${i.product.name}`).slice(0, 4),
           precio:     calc.promoPrice,
           ahorro:     calc.savings,
+          savingsPct: calc.savingsPct,
           param,
           bg,
+          qty:        mainItems.reduce((a, i) => a + i.qty, 0),
         }),
       });
-      const data = await res.json();
-      if (data.url) setAiImgUrl(data.url);
-      else console.error('AI image error:', data.error);
+      const data = await res.json() as { url?: string; dataUrl?: string; error?: string };
+      const imgSrc = data.dataUrl ?? data.url ?? null;
+      if (imgSrc) setAiImgUrl(imgSrc);
+      else setSavedToast(`❌ ${data.error ?? 'No se pudo generar la imagen'}`);
     } catch (e) {
       console.error('generateAiImage failed:', e);
+      setSavedToast('❌ Error al generar imagen');
     } finally {
       setAiLoading(false);
     }
+  };
+
+  // ── Load saved promos on mount ─────────────────────────────────────────────
+  useEffect(() => {
+    fetch('/api/promos').then(r => r.json()).then((d: SavedPromo[]) => setSavedPromos(d)).catch(() => {});
+  }, []);
+
+  // ── Save current promo ────────────────────────────────────────────────────
+  const handleSavePromo = async () => {
+    if (!tipo || !objetivo || !calc) return;
+    setSaving(true);
+    try {
+      const body = {
+        name:      promoName || `Promo ${tipo} ${new Date().toLocaleDateString('es-AR')}`,
+        objetivo,
+        tipo,
+        param,
+        bg,
+        promoMode,
+        fixedPrice,
+        promoPrice: calc.promoPrice,
+        savings:    calc.savings,
+        savingsPct: calc.savingsPct,
+        margin:     calc.margin,
+        items: items.map(i => ({
+          productId:    i.product.id,
+          productName:  i.product.name,
+          productPrice: i.product.price,
+          productCost:  i.product.cost,
+          productImage: i.product.image ?? null,
+          odooId:       i.product.odooId ?? null,
+          qty:          i.qty,
+          isGift:       i.isGift,
+        })),
+      };
+      const res  = await fetch('/api/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json() as { ok: boolean; promo?: SavedPromo };
+      if (data.ok && data.promo) {
+        setSavedPromos(prev => [data.promo!, ...prev]);
+        setSavedToast('✅ Promo guardada');
+        setTimeout(() => setSavedToast(null), 2500);
+      }
+    } catch { setSavedToast('❌ Error al guardar'); setTimeout(() => setSavedToast(null), 2500); }
+    finally  { setSaving(false); }
+  };
+
+  // ── Load a saved promo into state ─────────────────────────────────────────
+  const handleLoadPromo = (p: SavedPromo) => {
+    setObjetivo(p.objetivo as Objetivo);
+    setTipo(p.tipo as TipoPromo);
+    setParam(p.param);
+    setBg(p.bg as BgOption);
+    setPromoMode(p.promoMode as PromoMode);
+    setFixedPrice(p.fixedPrice);
+    setPromoName(p.name);
+    setItems(p.items.map(i => ({
+      qty:     i.qty,
+      isGift:  i.isGift,
+      product: {
+        id:       i.productId,
+        sku:      null,
+        name:     i.productName,
+        cost:     i.productCost,
+        price:    i.productPrice,
+        margin:   i.productCost > 0 ? Math.round((i.productPrice - i.productCost) / i.productPrice * 100) : null,
+        image:    i.productImage,
+        category: null,
+        supplierName: null,
+        uom:      'unidad',
+        odooId:   i.odooId,
+      },
+    })));
+    setStep('publicar');
+    setShowSaved(false);
+  };
+
+  // ── Delete a saved promo ──────────────────────────────────────────────────
+  const handleDeletePromo = async (id: string) => {
+    await fetch(`/api/promos?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    setSavedPromos(prev => prev.filter(p => p.id !== id));
   };
 
   const downloadCanvas = () => {
@@ -884,6 +1222,24 @@ ${gifts ? '\n' + gifts + '\n' : ''}
             <p className="text-white/40 text-sm mt-0.5">Armá combos, calculá rentabilidad y publicá en minutos</p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Promos guardadas */}
+            <button
+              onClick={() => setShowSaved(v => !v)}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-xl text-[12px] font-semibold border transition-all',
+                showSaved
+                  ? 'bg-[#16A34A] border-[#16A34A] text-white'
+                  : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/20',
+              )}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Guardadas</span>
+              {savedPromos.length > 0 && (
+                <span className="bg-white/20 rounded-full text-[10px] px-1.5 py-0.5 font-bold">
+                  {savedPromos.length}
+                </span>
+              )}
+            </button>
             <button
               onClick={() => setConsultorOpen(v => !v)}
               className={cn(
@@ -905,6 +1261,59 @@ ${gifts ? '\n' + gifts + '\n' : ''}
           </div>
         </div>
       </div>
+
+      {/* ── Promos guardadas panel ── */}
+      {showSaved && (
+        <div className="bg-[#07111F]/95 border-b border-white/10 px-5 lg:px-8 xl:px-12 py-4">
+          <div className="max-w-[1680px] mx-auto">
+            <p className="text-white/50 text-[11px] font-semibold uppercase tracking-widest mb-3">
+              Promos guardadas ({savedPromos.length})
+            </p>
+            {savedPromos.length === 0 ? (
+              <p className="text-white/40 text-sm">No hay promos guardadas todavía.</p>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {savedPromos.map(p => (
+                  <div key={p.id} className="flex-shrink-0 w-60 bg-white/8 border border-white/10 rounded-xl p-3">
+                    <p className="text-white font-semibold text-[13px] line-clamp-1">{p.name}</p>
+                    <p className="text-white/50 text-[11px] mt-0.5 mb-2">
+                      {p.tipo} · {new Date(p.savedAt).toLocaleDateString('es-AR')}
+                    </p>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[#0784F2] font-bold text-[14px]">
+                        {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(p.promoPrice)}
+                      </span>
+                      {p.margin !== null && (
+                        <span className={cn('text-[11px] font-bold px-1.5 py-0.5 rounded',
+                          p.margin >= 40 ? 'bg-[#16A34A]/20 text-[#16A34A]' :
+                          p.margin >= 30 ? 'bg-[#F97316]/20 text-[#F97316]' :
+                          'bg-[#EF4444]/20 text-[#EF4444]'
+                        )}>
+                          {Math.round(p.margin)}% mg
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button
+                        onClick={() => handleLoadPromo(p)}
+                        className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-[#0784F2] text-white rounded-lg text-[11px] font-semibold hover:opacity-90"
+                      >
+                        <RefreshCw className="w-3 h-3" /> Cargar
+                      </button>
+                      <button
+                        onClick={() => handleDeletePromo(p.id)}
+                        className="p-1.5 bg-white/10 text-white/50 rounded-lg hover:bg-[#EF4444]/20 hover:text-[#EF4444] transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Consultor panel (slide-in desde arriba) ── */}
       {consultorOpen && (
@@ -1404,6 +1813,42 @@ ${gifts ? '\n' + gifts + '\n' : ''}
                 );
               })()}
 
+              {/* ── Stock de combos disponibles ── */}
+              {tipo === 'combo' && combosDisponibles !== null && (
+                <div className={cn(
+                  'mt-4 rounded-xl p-4 border',
+                  combosDisponibles === 0 ? 'bg-[#EF4444]/5 border-[#EF4444]/20' :
+                  combosDisponibles < 5  ? 'bg-[#F97316]/5 border-[#F97316]/20' :
+                  'bg-[#16A34A]/5 border-[#16A34A]/20'
+                )}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Combos armables con stock actual</p>
+                      <p className={cn('text-[36px] font-black mt-0.5',
+                        combosDisponibles === 0 ? 'text-[#EF4444]' :
+                        combosDisponibles < 5  ? 'text-[#F97316]' : 'text-[#16A34A]'
+                      )}>
+                        {combosDisponibles} combo{combosDisponibles !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="text-right text-[11px] text-gray-500 space-y-0.5">
+                      {items.filter(i => !i.isGift).map(item => {
+                        const prod = todosProductos.find(p => p.id === item.product.id);
+                        const stock = (prod as { stock?: number })?.stock ?? 0;
+                        return (
+                          <p key={item.product.id}>
+                            {item.product.name.slice(0, 22)}: <span className="font-bold">{stock} u.</span> → {Math.floor(stock / item.qty)} combos
+                          </p>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {combosDisponibles === 0 && (
+                    <p className="text-[11px] text-[#EF4444] mt-2">Sin stock suficiente para armar ningún combo. Verificá el inventario.</p>
+                  )}
+                </div>
+              )}
+
               {/* Modo de precio */}
               <div className="mt-4 bg-white rounded-xl border border-gray-100 p-4">
                 <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-3">Modo de precio</p>
@@ -1610,6 +2055,17 @@ ${gifts ? '\n' + gifts + '\n' : ''}
                 />
               </div>
 
+              {/* Guardar promo */}
+              <button
+                onClick={handleSavePromo}
+                disabled={saving || !calc}
+                className="mt-3 w-full flex items-center justify-center gap-2 py-2.5 bg-[#16A34A] text-white rounded-xl font-semibold text-[13px] hover:opacity-90 disabled:opacity-40 transition-opacity"
+              >
+                {saving
+                  ? <><RefreshCw className="w-4 h-4 animate-spin" /> Guardando…</>
+                  : <><BookmarkPlus className="w-4 h-4" /> Guardar promo</>}
+              </button>
+
               <div className="mt-3 flex gap-2">
                 <button
                   onClick={downloadCanvas}
@@ -1714,10 +2170,68 @@ ${gifts ? '\n' + gifts + '\n' : ''}
                   </div>
                 </div>
 
-                <div className="mt-4 p-3 bg-[#F97316]/5 border border-[#F97316]/15 rounded-xl">
-                  <p className="text-[11px] text-gray-600">
-                    <span className="font-bold text-[#F97316]">📋 Siguiente paso:</span> Copiá el combo en Odoo manualmente.
-                    El precio de Lista A para este combo es <span className="font-bold">{formatARS(calc.promoPrice)}</span>.
+                <div className="mt-4 p-4 bg-[#0784F2]/5 border border-[#0784F2]/20 rounded-xl">
+                  <p className="text-[11px] text-gray-600 mb-1">
+                    <span className="font-bold text-[#0784F2]">📦 Combo armable:</span>{' '}
+                    {combosDisponibles !== null
+                      ? <span className="font-bold">{combosDisponibles} combo{combosDisponibles !== 1 ? 's' : ''} con el stock actual</span>
+                      : 'Verificar stock en productos'}
+                  </p>
+                  <p className="text-[11px] text-gray-500 mb-3">
+                    Componentes: {items.filter(i => !i.isGift).map(i => `${i.qty}× ${i.product.name}`).join(' + ')} · Lista A: <span className="font-bold">{formatARS(calc.promoPrice)}</span>
+                  </p>
+                  <button
+                    onClick={async () => {
+                      if (!promoName) {
+                        setSavedToast('⚠️ Ponele un nombre a la promo primero');
+                        setTimeout(() => setSavedToast(null), 2500);
+                        return;
+                      }
+                      const comboId = `combo_${Date.now()}`;
+                      const margin  = calc.totalCost > 0
+                        ? Math.round((calc.promoPrice - calc.totalCost) / calc.promoPrice * 100 * 10) / 10
+                        : null;
+                      const body = {
+                        id:           comboId,
+                        name:         promoName,
+                        cost:         Math.round(calc.totalCost * 100) / 100,
+                        price:        calc.promoPrice,
+                        margin,
+                        category:     'Combos',
+                        active:       true,
+                        hidden:       false,
+                        stock:        combosDisponibles ?? 0,
+                        type:         'combo',
+                        sku:          null,
+                        barcode:      null,
+                        image:        null,
+                        supplierName: 'Armado interno',
+                        components:   items.filter(i => !i.isGift).map(i => ({
+                          productId:   i.product.id,
+                          productName: i.product.name,
+                          qty:         i.qty,
+                        })),
+                        source: 'combo-promo',
+                      };
+                      try {
+                        const res  = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                        const data = await res.json() as { ok: boolean; error?: string };
+                        if (data.ok) {
+                          setSavedToast(`✅ "${promoName}" agregado a Productos — categoría Combos`);
+                        } else {
+                          setSavedToast(`❌ ${data.error ?? 'Error al crear producto'}`);
+                        }
+                      } catch (e) {
+                        setSavedToast(`❌ Error: ${String(e)}`);
+                      }
+                      setTimeout(() => setSavedToast(null), 3500);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0784F2] text-white rounded-lg text-[11px] font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    <Package className="w-3 h-3" /> Agregar a Productos como COMBO
+                  </button>
+                  <p className="text-[10px] text-gray-400 mt-2">
+                    Después desde Productos → Odoo podés sincronizarlo con el botón Sync.
                   </p>
                 </div>
               </div>
@@ -1759,6 +2273,16 @@ ${gifts ? '\n' + gifts + '\n' : ''}
         </div>
 
       </div>
+
+      {/* Toast: guardar / Odoo */}
+      {savedToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-3 bg-[#07111F] text-white text-[13px] font-semibold rounded-2xl shadow-2xl flex items-center gap-2.5 whitespace-nowrap">
+          {savedToast}
+          <button onClick={() => setSavedToast(null)} className="ml-2 opacity-50 hover:opacity-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -21,5 +21,6 @@ export const SUPPLIERS_PATH        = dataPath('suppliers.json');
 export const ML_LAB_PATH           = dataPath('ml-lab.json');
 export const ACTION_LOG_PATH       = dataPath('action-log.jsonl');
 export const COMPETITOR_LINKS_PATH = dataPath('competitor-links.json');
-export const SEIQ_CATALOG_PATH     = dataPath('seiq-catalog.json');
+export const SEIQ_CATALOG_PATH      = dataPath('seiq-catalog.json');
 export const ODOO_SUPPLIERINFO_PATH = dataPath('odoo-supplierinfo.json');
+export const SAVED_PROMOS_PATH      = dataPath('saved-promos.json');

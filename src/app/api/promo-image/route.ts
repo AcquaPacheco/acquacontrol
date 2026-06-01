@@ -1,92 +1,196 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { readFileSync, existsSync } from 'fs';
+import { SETTINGS_PATH } from '@/lib/data-paths';
 
-/**
- * POST /api/promo-image
- * Llama a DALL-E 3 para generar una imagen promocional basada en los datos de la promo.
- * Requiere OPENAI_API_KEY en las variables de entorno.
- */
+// ── Brief de diseño corporativo Acqua Pacheco ─────────────────────────────────
+const DESIGN_BRIEF = `
+Sos el diseñador gráfico de Acqua Pacheco, una distribuidora argentina de limpieza y hogar.
 
-const BG_PROMPTS: Record<string, string> = {
-  blanco:  'clean white background, minimal product photography style',
-  azul:    'vivid blue gradient background (#0784F2), modern retail style',
-  oscuro:  'deep dark navy background (#07111F), premium luxury style',
-  verano:  'warm orange to yellow gradient background, summer vibes',
-  violeta: 'purple to pink gradient background, vibrant promotional style',
-  custom:  'colorful professional background',
-};
+ESTILO VISUAL:
+- Formato cuadrado 1:1 (para Instagram/WhatsApp)
+- Fondo claro: blanco o gris muy suave (#F5F4F0)
+- Alto contraste: negro profundo, rojo (#E53E3E) y acentos del producto
+- Producto protagonista: grande, limpio, sin fondo blanco, centrado o ligeramente desplazado
+- NO inventar precios ni nombres: usar EXACTAMENTE los datos que te pasan
 
-const TIPO_PROMPTS: Record<string, string> = {
-  '2da_unidad':  'Buy 2 get one at discount, shown with two product units side by side',
-  'por_cantidad': 'Bulk quantity discount promotion, multiple units displayed',
-  'descuento':   'Direct discount promotion with a bold percentage badge',
-  'combo':       'Combo deal bundle, products arranged together as a set',
-  'regalo':      'Gift included promotion with a ribbon or gift bow visual element',
-};
+JERARQUÍA VISUAL (de arriba a abajo):
+1. BENEFICIO PRINCIPAL (headline grande, negrita, máximo 5 palabras)
+2. NOMBRE DEL PRODUCTO (bold, secundario)
+3. PRECIO REGULAR tachado (pequeño, gris)
+4. PRECIO PROMO (enorme, dominante, negro o rojo)
+5. AHORRO en rojo: "Ahorrás $X" o "X% OFF"
+6. "Precio único con cualquier medio de pago" (si corresponde)
 
+TIPOGRAFÍA:
+- Fuente sans-serif bold/black
+- Headline: muy grande (ocupa casi todo el ancho)
+- Precio promo: enorme, negro o acento
+- Subtextos: pequeños y discretos
+
+COMPOSICIÓN:
+- Producto a la derecha o centrado, texto a la izquierda o superpuesto
+- Badges rojos para % OFF (círculo o rectángulo redondeado)
+- Contenedores con bordes suaves y sombra leve para precio
+- Barra inferior oscura con medios de pago
+- Logo "ACQUA PACHECO" en el header (pequeño, discreto)
+- Aire visual suficiente — no sobrecargar
+
+RESULTADO ESPERADO:
+Diseño que cualquier cliente entienda en 3 segundos. Estilo de comercio local argentino, vendedor, directo, limpio. Similar a publicidades comerciales brasileras de alto impacto.
+`;
+
+// ── Leer credenciales ─────────────────────────────────────────────────────────
+function readSettings(): Record<string, string> {
+  try {
+    if (existsSync(SETTINGS_PATH))
+      return JSON.parse(readFileSync(SETTINGS_PATH, 'utf8')) as Record<string, string>;
+  } catch { /* ignorar */ }
+  return {};
+}
+
+// ── Generar con Gemini (imagen inline base64) ─────────────────────────────────
+async function generateWithGemini(prompt: string, apiKey: string): Promise<string | null> {
+  // Intentar con gemini-2.0-flash-exp que soporta generación de imágenes
+  for (const model of ['gemini-2.0-flash-exp', 'gemini-2.0-flash-preview-image-generation']) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseModalities: ['IMAGE', 'TEXT'] },
+          }),
+        }
+      );
+      if (!res.ok) continue;
+      const data = await res.json() as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }
+        }>
+      };
+      const part = data.candidates?.[0]?.content?.parts
+        ?.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+      if (part?.inlineData?.data) {
+        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+      }
+    } catch { continue; }
+  }
+  return null;
+}
+
+// ── Generar con DALL-E 3 ──────────────────────────────────────────────────────
+async function generateWithDallE(prompt: string, apiKey: string): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method:  'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'dall-e-3', prompt, n: 1, size: '1024x1024', quality: 'standard' }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { data: { url: string }[] };
+    return data.data[0]?.url ?? null;
+  } catch { return null; }
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const body = await req.json() as {
+    promoName:  string;
+    tipo:       string;
+    objetivo:   string;
+    productos:  string[];
+    precio:     number;
+    ahorro:     number;
+    savingsPct: number;
+    param:      number;
+    bg:         string;
+    qty?:       number;
+  };
+
+  const { promoName, tipo, productos, precio, ahorro, savingsPct, param, qty = 1 } = body;
+  const settings = readSettings();
+  const geminiKey = settings.geminiKey || process.env.GEMINI_API_KEY || '';
+  const openaiKey = process.env.OPENAI_API_KEY || '';
+
+  if (!geminiKey && !openaiKey) {
     return NextResponse.json(
-      { error: 'OPENAI_API_KEY no configurada. Agregala en .env.local como OPENAI_API_KEY=sk-...' },
+      { error: 'Configurá la Gemini API Key en Parámetros → Integraciones' },
       { status: 500 },
     );
   }
 
-  const body = await req.json() as {
-    promoName: string;
-    tipo: string;
-    objetivo: string;
-    productos: string[];
-    precio: number;
-    ahorro: number;
-    param: number;
-    bg: string;
-  };
+  // ── Armar el prompt de diseño específico ──────────────────────────────────
+  const ars = (n: number) =>
+    new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
 
-  const { promoName, tipo, productos, precio, ahorro, param, bg } = body;
+  const precioRegular = ahorro > 0 ? precio + ahorro : null;
+  const perUnit = qty > 1 ? Math.round(precio / qty) : null;
 
-  const bgPrompt    = BG_PROMPTS[bg] ?? BG_PROMPTS.azul;
-  const tipoPrompt  = TIPO_PROMPTS[tipo] ?? '';
-  const prodList    = productos.slice(0, 3).join(', ');
-  const ahorroLine  = ahorro > 0 ? ` Customer saves $${Math.round(ahorro).toLocaleString('es-AR')}.` : '';
+  const tipoLabel =
+    tipo === '2da_unidad'    ? `2da unidad al ${param}% OFF`
+    : tipo === 'por_cantidad'  ? `${param}% OFF por cantidad`
+    : tipo === 'descuento'     ? `${param}% de descuento`
+    : tipo === 'combo'         ? 'combo precio especial'
+    : tipo === 'regalo'        ? 'con regalo incluido'
+    : 'oferta especial';
 
-  const prompt = [
-    `Create a clean, editorial-style square (1:1) promotional banner for an Argentine cleaning and household products store called "Acqua Pacheco".`,
-    `Visual style reference: minimal white or solid-color background, products displayed on clean white geometric pedestals/risers casting soft shadows, bold oversized typography for the offer.`,
-    `Promotion: "${promoName}". ${tipoPrompt}`,
-    `Featured products: ${prodList}. Show them as clean product shots arranged on white rectangular display podiums, with soft drop shadows, like a high-end retail advertisement.`,
-    param > 0 ? `Feature "${param}% OFF" in very large, bold, dominant black typography (similar to editorial fashion advertising).` : '',
-    `Show price $${Math.round(precio).toLocaleString('es-AR')} in a secondary accent color.${ahorroLine}`,
-    `Background: ${bgPrompt}.`,
-    `Layout (top to bottom): "ACQUA PACHECO" brand name in small spaced letters at top → thin horizontal rule → small pill tag with offer type → HUGE bold offer text → products on pedestals → price details → thin footer bar with contact info.`,
-    `Typography must be clean sans-serif, no decorative fonts. Text in Spanish.`,
-    `Quality: commercial photography aesthetic, premium retail, no people, no clutter. Square format 1:1.`,
-  ].filter(Boolean).join(' ');
+  const headline =
+    tipo === '2da_unidad'    ? `LLEVÁ 2, LA 2DA AL ${param}% OFF`
+    : tipo === 'por_cantidad'  ? `${param}% OFF COMPRANDO LA CANTIDAD`
+    : tipo === 'descuento'     ? `${param}% DE DESCUENTO`
+    : tipo === 'combo'         ? `COMBO: ${(promoName || productos[0] || '').toUpperCase().slice(0, 30)}`
+    : tipo === 'regalo'        ? `CON TU COMPRA, ¡UN REGALO!`
+    : (promoName || 'OFERTA ESPECIAL').toUpperCase();
 
-  try {
-    const openaiRes = await fetch('https://api.openai.com/v1/images/generations', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model:   'dall-e-3',
-        prompt,
-        n:       1,
-        size:    '1024x1024',
-        quality: 'standard',
-      }),
-    });
+  const prompt = `
+${DESIGN_BRIEF}
 
-    if (!openaiRes.ok) {
-      const err = await openaiRes.json();
-      return NextResponse.json({ error: err.error?.message ?? 'OpenAI error' }, { status: 500 });
-    }
+---
+DATOS EXACTOS DE LA PROMO (NO INVENTAR NADA):
 
-    const data = await openaiRes.json() as { data: { url: string }[] };
-    return NextResponse.json({ url: data.data[0]?.url });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+TÍTULO PRINCIPAL: "${headline}"
+TIPO DE PROMO: ${tipoLabel}
+PRODUCTO(S): ${productos.slice(0, 3).join(' + ')}
+${precioRegular ? `PRECIO REGULAR: ${ars(precioRegular)} (tachado, secundario)` : ''}
+PRECIO PROMO: ${ars(precio)} (grande, dominante)
+${ahorro > 0 ? `AHORRO: ${ars(ahorro)} (${Math.round(savingsPct)}% OFF — destacado en rojo)` : ''}
+${perUnit ? `PRECIO POR UNIDAD: ${ars(perUnit)} c/u` : ''}
+${qty > 1 ? `CANTIDAD: ${qty} unidades` : ''}
+MEDIO DE PAGO: Precio único con cualquier medio de pago (VISA, Mastercard, Débito, Transferencia, Efectivo)
+
+INSTRUCCIONES ADICIONALES:
+- El producto debe aparecer grande y limpio, sin fondo blanco (recortado)
+- Usar exactamente estos precios y nombres, no inventar nada
+- Diseño en español argentino, comercial, directo
+- El precio promo debe ser visualmente dominante
+- Incluir el badge de ahorro en rojo
+- Footer con "ACQUA PACHECO" y medios de pago
+- NO agregar texto genérico tipo "gran oferta" — usar los datos exactos provistos
+`;
+
+  // Intentar Gemini primero (ya configurado), después DALL-E como fallback
+  let result: string | null = null;
+
+  if (geminiKey) {
+    result = await generateWithGemini(prompt, geminiKey);
   }
+
+  if (!result && openaiKey) {
+    result = await generateWithDallE(prompt, openaiKey);
+  }
+
+  if (!result) {
+    return NextResponse.json(
+      { error: 'No se pudo generar la imagen. Verificá la Gemini API Key en Parámetros.' },
+      { status: 500 },
+    );
+  }
+
+  // Si es URL (DALL-E), devolver como url. Si es data URL (Gemini), devolver como dataUrl.
+  if (result.startsWith('data:')) {
+    return NextResponse.json({ dataUrl: result });
+  }
+  return NextResponse.json({ url: result });
 }
