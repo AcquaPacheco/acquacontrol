@@ -1,0 +1,29 @@
+app = "acquacontrol"
+primary_region = "gru"   # São Paulo — más cercano a Argentina
+
+[build]
+
+[env]
+  NODE_ENV    = "production"
+  DATA_DIR    = "/data"
+  PORT        = "3000"
+
+[http_service]
+  internal_port       = 3000
+  force_https         = true
+  auto_stop_machines  = true
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type       = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[[mounts]]
+  source      = "acquacontrol_data"
+  destination = "/data"
