@@ -173,13 +173,15 @@ export async function POST(req: NextRequest) {
   try {
     // Parse sync options from body
     const body = await req.json().catch(() => ({})) as {
-      syncCost?:  boolean;
-      syncPrice?: boolean;
-      syncName?:  boolean;
+      syncCost?:    boolean;
+      syncPrice?:   boolean;
+      syncName?:    boolean;
+      createNew?:   boolean;  // Import products that don't exist locally yet
     };
     const syncCost  = body.syncCost  !== false; // default true
     const syncPrice = body.syncPrice !== false; // default true
     const syncName  = body.syncName  === true;  // default false (names are often customized locally)
+    const createNew = body.createNew !== false; // default true — import missing products
 
     if (!existsSync(SETTINGS_PATH))
       return NextResponse.json({ ok: false, error: 'settings.json no encontrado' }, { status: 500 });
@@ -220,8 +222,8 @@ export async function POST(req: NextRequest) {
           'product.template', 'search_read',
           [[['active', '=', true], ['sale_ok', '=', true]]],
           {
-            fields: ['id', 'name', 'default_code', 'standard_price', 'list_price', 'categ_id'],
-            limit: 3000,
+            fields: ['id', 'name', 'default_code', 'standard_price', 'list_price', 'categ_id', 'barcode'],
+            limit: 5000,
           },
         ]
       );
@@ -234,6 +236,29 @@ export async function POST(req: NextRequest) {
 
     if (odooTemplates.length === 0)
       return NextResponse.json({ ok: false, error: 'Odoo devolvió 0 templates. Verificá permisos.' }, { status: 500 });
+
+    // ── 2b. Fetch stock per template (via product.product variants) ───────────
+    const tmplStock = new Map<number, number>();
+    try {
+      const varResult = await xmlRpc(
+        `${baseUrl}/xmlrpc/2/object`,
+        'execute_kw',
+        [
+          db, uid, odooApiKey,
+          'product.product', 'search_read',
+          [[['active', '=', true]]],
+          { fields: ['product_tmpl_id', 'qty_available'], limit: 10000 },
+        ]
+      );
+      if (Array.isArray(varResult)) {
+        for (const v of varResult as Record<string, unknown>[]) {
+          const tmplRaw = v.product_tmpl_id;
+          const tmplId  = Array.isArray(tmplRaw) ? Number(tmplRaw[0]) : null;
+          if (!tmplId) continue;
+          tmplStock.set(tmplId, (tmplStock.get(tmplId) ?? 0) + Math.max(0, Number(v.qty_available) || 0));
+        }
+      }
+    } catch { /* stock es opcional, continúa sin él */ }
 
     // ── 3. Load local products ──
     if (!existsSync(PRODUCTS_PATH))
@@ -253,84 +278,115 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 4. Match & update ──
-    let matched    = 0;
-    let costChanged  = 0;
-    let priceChanged = 0;
-    let nameChanged  = 0;
+    let matched          = 0;
+    let costChanged      = 0;
+    let priceChanged     = 0;
+    let nameChanged      = 0;
     let odooIdBackfilled = 0;
-    const unmatched: string[] = [];
+    let stockUpdated     = 0;
+    const newProducts: LocalProduct[]                               = [];
     const historyEntries: Omit<HistoryEntry, 'id' | 'timestamp'>[] = [];
 
     for (const ot of odooTemplates) {
       const odooTmplId = typeof ot.id === 'number' ? ot.id : null;
       if (!odooTmplId) continue;
 
-      const sku       = ot.default_code ? norm(String(ot.default_code)) : null;
+      const skuRaw    = ot.default_code ? String(ot.default_code).trim() : null;
+      const sku       = skuRaw ? norm(skuRaw) : null;
       const odooCost  = typeof ot.standard_price === 'number' ? ot.standard_price : 0;
       const odooPrice = typeof ot.list_price      === 'number' ? ot.list_price      : 0;
-      const odooName  = typeof ot.name === 'string' ? ot.name : '';
+      const odooName  = typeof ot.name === 'string' ? ot.name.trim() : '';
+      const barcode   = ot.barcode ? String(ot.barcode).trim() : null;
+      const stock     = Math.round((tmplStock.get(odooTmplId) ?? 0) * 100) / 100;
+      const categRaw  = ot.categ_id;
+      const category  = Array.isArray(categRaw) ? String(categRaw[1] ?? '') : null;
 
       // Match: odooId first → SKU → name
       let local = byOdooId.get(odooTmplId);
-      if (!local && sku) local = bySku.get(sku);
-      if (!local) local = byName.get(norm(odooName));
+      if (!local && sku)      local = bySku.get(sku);
+      if (!local && odooName) local = byName.get(norm(odooName));
 
       if (!local) {
-        unmatched.push(odooName);
+        // ── CREATE new product (if enabled and has a price) ──────────────────
+        if (createNew && odooPrice > 0) {
+          const newProd: LocalProduct = {
+            id:           `odoo_${odooTmplId}`,
+            name:         odooName,
+            sku:          skuRaw,
+            barcode:      barcode,
+            cost:         round2(odooCost),
+            price:        round2(odooPrice),
+            margin:       calcMargin(odooCost, odooPrice),
+            markup:       calcMarkup(odooCost, odooPrice),
+            category:     category || 'Sin categoría',
+            supplierName: null,
+            active:       true,
+            hidden:       false,   // nuevos productos visibles por defecto
+            stock:        stock,
+            odooId:       odooTmplId,
+            image:        null,
+          };
+          newProducts.push(newProd);
+          byOdooId.set(odooTmplId, newProd);
+          if (skuRaw) bySku.set(norm(skuRaw), newProd);
+          byName.set(norm(odooName), newProd);
+        }
         continue;
       }
 
       matched++;
 
       // Backfill odooId if missing
-      if (!local.odooId && odooTmplId) {
+      if (!local.odooId) {
         local.odooId = odooTmplId;
         odooIdBackfilled++;
-        // Also add to map for any future matches in this loop
         byOdooId.set(odooTmplId, local);
       }
 
       const prodName = String(local.name);
 
+      // Si el producto existe y activo en Odoo, activarlo también localmente
+      if (local.active === false) {
+        local.active = true;
+      }
+
+      // Update stock from Odoo
+      if (tmplStock.has(odooTmplId)) {
+        local.stock = stock;
+        stockUpdated++;
+      }
+
       // Sync cost
       if (syncCost && odooCost > 0 && round2(odooCost) !== round2(local.cost)) {
-        historyEntries.push({
-          productId: local.id, productName: prodName,
-          field: 'cost', oldValue: local.cost, newValue: round2(odooCost), source: 'sync_odoo',
-        });
+        historyEntries.push({ productId: local.id, productName: prodName, field: 'cost', oldValue: local.cost, newValue: round2(odooCost), source: 'sync_odoo' });
         local.cost = round2(odooCost);
         costChanged++;
       }
 
       // Sync price
       if (syncPrice && odooPrice > 1 && round2(odooPrice) !== round2(local.price)) {
-        historyEntries.push({
-          productId: local.id, productName: prodName,
-          field: 'price', oldValue: local.price, newValue: round2(odooPrice), source: 'sync_odoo',
-        });
+        historyEntries.push({ productId: local.id, productName: prodName, field: 'price', oldValue: local.price, newValue: round2(odooPrice), source: 'sync_odoo' });
         local.price = round2(odooPrice);
         priceChanged++;
       }
 
-      // Recalculate margin & markup after cost/price changes
-      if ((syncCost || syncPrice) && local.cost > 0 && local.price > 1) {
+      // Recalculate margin & markup
+      if (local.cost > 0 && local.price > 1) {
         local.margin = calcMargin(local.cost, local.price);
         local.markup = calcMarkup(local.cost, local.price);
       }
 
       // Sync name (optional)
       if (syncName && odooName && norm(odooName) !== norm(local.name)) {
-        historyEntries.push({
-          productId: local.id, productName: prodName,
-          field: 'name', oldValue: local.name, newValue: odooName, source: 'sync_odoo',
-        });
+        historyEntries.push({ productId: local.id, productName: prodName, field: 'name', oldValue: local.name, newValue: odooName, source: 'sync_odoo' });
         local.name = odooName;
         nameChanged++;
       }
     }
 
     // ── 5. Save ──
-    writeFileSync(PRODUCTS_PATH, JSON.stringify(localProducts, null, 2), 'utf8');
+    const finalProducts = [...localProducts, ...newProducts];
+    writeFileSync(PRODUCTS_PATH, JSON.stringify(finalProducts, null, 2), 'utf8');
     appendHistoryBatch(historyEntries);
 
     const fields: SyncField[] = [];
@@ -338,18 +394,23 @@ export async function POST(req: NextRequest) {
     if (syncPrice) fields.push('price');
     if (syncName)  fields.push('name');
 
+    const hiddenCount = finalProducts.filter(p => Boolean(p.hidden)).length;
+    const withStock   = finalProducts.filter(p => Number(p.stock ?? 0) > 0).length;
+
     return NextResponse.json({
-      ok: true,
-      total:            odooTemplates.length,
+      ok:              true,
+      total:           odooTemplates.length,
       matched,
-      unmatched:        unmatched.length,
-      unmatchedSample:  unmatched.slice(0, 8),
+      created:         newProducts.length,
       costChanged,
       priceChanged,
       nameChanged,
+      stockUpdated,
       odooIdBackfilled,
-      syncedFields:     fields,
-      message: `✅ ${matched} productos sincronizados — ${costChanged} costos, ${priceChanged} precios actualizados desde Odoo.`,
+      hidden:          hiddenCount,
+      withStock,
+      syncedFields:    fields,
+      message: `✅ Sync completo: ${matched} actualizados, ${newProducts.length} nuevos importados desde Odoo. ${hiddenCount} ocultos preservados.`,
     });
 
   } catch (e) {

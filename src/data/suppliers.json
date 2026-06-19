@@ -217,7 +217,8 @@
       "Proveedor"
     ],
     "fiscalCondition": null,
-    "odooId": 851
+    "odooId": 851,
+    "active": false
   },
   {
     "id": "__export__.res_partner_1357_455477c9",
@@ -275,7 +276,8 @@
       "Edenor"
     ],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 1206
+    "odooId": 1206,
+    "active": false
   },
   {
     "id": "__export__.res_partner_843_d9a2953b",
@@ -321,7 +323,8 @@
       "Expensas"
     ],
     "fiscalCondition": "Consumidor Final",
-    "odooId": 1336
+    "odooId": 1336,
+    "active": false
   },
   {
     "id": "__export__.res_partner_827_05ff0198",
@@ -354,7 +357,8 @@
     "phone": null,
     "tags": [],
     "fiscalCondition": "Responsable Monotributo",
-    "odooId": 1335
+    "odooId": 1335,
+    "active": false
   },
   {
     "id": "__export__.res_partner_2120_c72b1b94",
@@ -396,7 +400,8 @@
     "phone": null,
     "tags": [],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 1185
+    "odooId": 1185,
+    "active": false
   },
   {
     "id": "__export__.res_partner_836_7abbec9f",
@@ -407,7 +412,8 @@
       "Consorcio"
     ],
     "fiscalCondition": "Consumidor Final",
-    "odooId": 836
+    "odooId": 836,
+    "active": false
   },
   {
     "id": "__export__.res_partner_848_9f88e51b",
@@ -457,7 +463,8 @@
       "Telephony equipment"
     ],
     "fiscalCondition": null,
-    "odooId": 1338
+    "odooId": 1338,
+    "active": false
   },
   {
     "id": "__export__.res_partner_1073_1828e2d5",
@@ -479,7 +486,8 @@
     "phone": "+54 9 11 3151-4012",
     "tags": [],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 1169
+    "odooId": 1169,
+    "active": false
   },
   {
     "id": "__export__.res_partner_2454_02fc665d",
@@ -488,7 +496,8 @@
     "phone": null,
     "tags": [],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 2454
+    "odooId": 2454,
+    "active": false
   },
   {
     "id": "__export__.res_partner_1650_5ee50b97",
@@ -507,7 +516,8 @@
     "phone": "+54 9 11 4716-1327",
     "tags": [],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 878
+    "odooId": 878,
+    "active": false
   },
   {
     "id": "__export__.res_partner_874_0ea7501f",
@@ -516,7 +526,8 @@
     "phone": "+54 9 11 2465-0524",
     "tags": [],
     "fiscalCondition": "IVA Responsable Inscripto",
-    "odooId": 874
+    "odooId": 874,
+    "active": false
   },
   {
     "id": "__export__.res_partner_1280_629efaa8",
@@ -534,6 +545,7 @@
     "phone": null,
     "tags": [],
     "fiscalCondition": null,
-    "odooId": 2427
+    "odooId": 2427,
+    "active": false
   }
 ]

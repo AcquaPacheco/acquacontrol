@@ -1,11 +1,11 @@
 {
   "dolar": {
-    "bna": 1410,
-    "operativo": 1450,
+    "bna": 1470.01,
+    "operativo": 1475,
     "porProveedor": [
       {
         "nombre": "VULCANO S.A.",
-        "tasa": 1420
+        "tasa": 1470
       }
     ]
   },
@@ -21,63 +21,72 @@
       "medio": "Crédito — 1 cuota",
       "lista": "A",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 6
     },
     {
       "id": "credito_3c",
       "medio": "Crédito — 3 cuotas",
       "lista": "A",
       "recargo": 8,
-      "activo": true
+      "activo": true,
+      "comision": 6
     },
     {
       "id": "credito_6c",
       "medio": "Crédito — 6 cuotas",
       "lista": "A",
       "recargo": 15,
-      "activo": true
+      "activo": true,
+      "comision": 6
     },
     {
       "id": "credito_12c",
       "medio": "Crédito — 12 cuotas",
       "lista": "A",
       "recargo": 30,
-      "activo": true
+      "activo": true,
+      "comision": 6
     },
     {
       "id": "debito",
       "medio": "Débito (Nave / Mercado Pago)",
       "lista": "B",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 2.5
     },
     {
       "id": "transferencia",
       "medio": "Transferencia bancaria",
       "lista": "B",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 0
     },
     {
       "id": "qr_nave",
       "medio": "QR Nave / Dinero en cuenta",
       "lista": "B",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 1
     },
     {
       "id": "mp_link",
       "medio": "MercadoPago Link de pago",
       "lista": "B",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 6.6
     },
     {
       "id": "efectivo",
       "medio": "Efectivo",
       "lista": "C",
       "recargo": 0,
-      "activo": true
+      "activo": true,
+      "comision": 0
     }
   ],
   "listas": [
@@ -86,7 +95,7 @@
       "nombre": "Lista A",
       "descripcion": "Precio público — Tarjeta de crédito (base del negocio)",
       "descuento": 0,
-      "margenMin": 45,
+      "margenMin": 35,
       "exportaOdoo": true
     },
     {
@@ -94,7 +103,7 @@
       "nombre": "Lista B",
       "descripcion": "Débito / Transferencia / QR — descuento sobre Lista A",
       "descuento": 10,
-      "margenMin": 38,
+      "margenMin": 30,
       "exportaOdoo": false
     },
     {
@@ -102,7 +111,7 @@
       "nombre": "Lista C",
       "descripcion": "Efectivo — descuento sobre Lista A",
       "descuento": 15,
-      "margenMin": 33,
+      "margenMin": 30,
       "exportaOdoo": false
     },
     {
@@ -110,7 +119,7 @@
       "nombre": "Profesional",
       "descripcion": "5% adicional sobre Lista A, B o C según cómo pague el cliente",
       "descuento": 5,
-      "margenMin": 28,
+      "margenMin": 25,
       "exportaOdoo": false,
       "descuentoBase": "A/B/C"
     },
@@ -119,7 +128,7 @@
       "nombre": "Consorcio",
       "descripcion": "Consorcios y admin. de edificios — recargo sobre Lista A",
       "descuento": -10,
-      "margenMin": 50,
+      "margenMin": 30,
       "exportaOdoo": false
     },
     {
@@ -127,7 +136,7 @@
       "nombre": "MercadoLibre",
       "descripcion": "Precio calculado por ML Lab: Markup sobre costo + IVA 21%",
       "descuento": 0,
-      "margenMin": 20,
+      "margenMin": 25,
       "exportaOdoo": false,
       "esMarkup": true
     },
@@ -136,7 +145,7 @@
       "nombre": "Mayorista",
       "descripcion": "Sin regla fija — precio negociado por SKU",
       "descuento": 25,
-      "margenMin": 22,
+      "margenMin": 20,
       "exportaOdoo": false
     }
   ],

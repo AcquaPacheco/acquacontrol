@@ -1,45 +1,28 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import productsData from '@/data/products.json';
-import { ArrowLeft, Printer, Search, ChevronDown, FileText, Tag, Image as ImageIcon } from 'lucide-react';
+import {
+  ArrowLeft, Printer, Search, ChevronDown, FileText, Tag,
+  Image as ImageIcon, Upload, CheckSquare, Square, X,
+  Camera, Eye, EyeOff,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface Product {
-  id: string;
-  sku: string | null;
-  name: string;
-  cost: number;
-  price: number;
-  margin: number | null;
-  category: string | null;
-  supplierName: string | null;
-  active: boolean;
-  hidden: boolean;
-  stock: number;
-  seiqCategory?: string | null;
-  image?: string | null;
-  odooId?: number | null;
+  id: string; sku: string | null; name: string;
+  cost: number; price: number; margin: number | null;
+  category: string | null; supplierName: string | null;
+  active: boolean; hidden: boolean; stock: number;
+  seiqCategory?: string | null; image?: string | null; odooId?: number | null;
 }
 
-interface Lista {
-  id: string;
-  nombre: string;
-  descripcion: string;
-  descuento: number;
-}
-
-interface Pago {
-  id: string;
-  medio: string;
-  lista: string;
-  recargo: number;
-  activo: boolean;
-}
+interface Lista { id: string; nombre: string; descripcion: string; descuento: number }
+interface Pago  { id: string; medio: string; lista: string; recargo: number; activo: boolean }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -70,7 +53,7 @@ function fmt(n: number) {
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ListaPreciosPage() {
-  // ── Params from server ──
+  // ── Params ──
   const [listas,   setListas]   = useState<Lista[]>([]);
   const [pagos,    setPagos]    = useState<Pago[]>([]);
   const [redondeo, setRedondeo] = useState({ multiplo: 10, siempreArriba: true });
@@ -95,21 +78,76 @@ export default function ListaPreciosPage() {
   }, []);
 
   // ── Filters ──
-  const [search,     setSearch]     = useState('');
-  const [category,   setCategory]   = useState('Todas');
-  const [supplier,   setSupplier]   = useState('Todos');
-  const [showStock,  setShowStock]  = useState(false); // only in-stock
+  const [search,        setSearch]        = useState('');
+  const [category,      setCategory]      = useState('Todas');
+  const [supplier,      setSupplier]      = useState('Todos');
+  const [showStock,     setShowStock]     = useState(false);
   const [selectedLista, setSelectedLista] = useState<string>('A');
-  const [showPriceCol,  setShowPriceCol]  = useState<'lista' | 'costo' | 'ambos'>('lista');
   const [compact,       setCompact]       = useState(false);
+  const [numColumnas,   setNumColumnas]   = useState(3);       // 1, 2 o 3 columnas de precio
+  const [showPhotos,    setShowPhotos]    = useState(true);    // fotos en impresión
+  const [selectedPago,  setSelectedPago]  = useState<string>('');
 
-  // Find active lista config
-  const listaConfig = listas.find(l => l.id === selectedLista) ?? { descuento: 0, nombre: selectedLista };
+  // ── Product selection ──────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()); // empty = todos
+  const toggleProduct = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next;
+    });
+  };
 
-  // Payment methods for this lista
-  const pagosMedios = pagos.filter(p => p.lista === selectedLista);
+  // ── Custom header image ────────────────────────────────────────────────────
+  const [customHeader, setCustomHeader] = useState<string | null>(null);
+  const headerInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Filtered products ──
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('acqua_lista_header_v1');
+      if (saved) setCustomHeader(saved);
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleHeaderUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setCustomHeader(base64);
+      try { localStorage.setItem('acqua_lista_header_v1', base64); } catch { /* ignore */ }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeHeader = () => {
+    setCustomHeader(null);
+    try { localStorage.removeItem('acqua_lista_header_v1'); } catch { /* ignore */ }
+  };
+
+  // ── Config ──
+  const listaConfig  = listas.find(l => l.id === selectedLista) ?? { id: selectedLista, nombre: selectedLista, descripcion: '', descuento: 0 };
+  const pagosMedios  = pagos.filter(p => p.lista === selectedLista);
+  const pagoActivo   = pagos.find(p => p.id === selectedPago);
+  const recargo      = pagoActivo?.recargo ?? 0;
+
+  // Tres columnas de precios: A (crédito), B (débito/transf 10%off), C (efectivo retiro 15%off)
+  const listaA = listas.find(l => l.id === 'A') ?? { descuento: 0 };
+  const listaB = listas.find(l => l.id === 'B') ?? { descuento: 10 };
+  const listaC = listas.find(l => l.id === 'C') ?? { descuento: 15 };
+  const descB  = listaB.descuento || 10;
+  const descC  = listaC.descuento || 15;
+
+  const precioA = (p: number) => round(p * (1 - (listaA.descuento || 0) / 100), redondeo.multiplo, redondeo.siempreArriba);
+  const precioB = (p: number) => round(p * (1 - descB / 100), redondeo.multiplo, redondeo.siempreArriba);
+  const precioC = (p: number) => round(p * (1 - descC / 100), redondeo.multiplo, redondeo.siempreArriba);
+
+  const calcPrice = (basePrice: number, rec = 0) => {
+    const afterDiscount = basePrice * (1 - listaConfig.descuento / 100);
+    const afterRecargo  = afterDiscount * (1 + rec / 100);
+    return round(afterRecargo, redondeo.multiplo, redondeo.siempreArriba);
+  };
+
+  // ── Filtered ──
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return products.filter(p => {
@@ -124,14 +162,7 @@ export default function ListaPreciosPage() {
     });
   }, [search, category, supplier, showStock]);
 
-  // ── Calc price for selected lista ──
-  const calcPrice = (basePrice: number, recargo = 0) => {
-    const afterDiscount = basePrice * (1 - listaConfig.descuento / 100);
-    const afterRecargo  = afterDiscount * (1 + recargo / 100);
-    return round(afterRecargo, redondeo.multiplo, redondeo.siempreArriba);
-  };
-
-  // ── Group by category ──
+  // ── Grouped ──
   const grouped = useMemo(() => {
     const map = new Map<string, Product[]>();
     for (const p of filtered) {
@@ -142,10 +173,8 @@ export default function ListaPreciosPage() {
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [filtered]);
 
-  // Payment method recargo
-  const [selectedPago, setSelectedPago] = useState<string>('');
-  const pagoActivo = pagos.find(p => p.id === selectedPago);
-  const recargo = pagoActivo?.recargo ?? 0;
+  const selectedCount = selectedIds.size;
+  const isSelected    = (id: string) => selectedIds.size === 0 || selectedIds.has(id);
 
   if (!loaded) {
     return (
@@ -155,18 +184,26 @@ export default function ListaPreciosPage() {
     );
   }
 
+  // Payment icons
+  const PAGO_ICONS: Record<string, string> = {
+    efectivo: '💵', debito: '💳', transferencia: '📲',
+    tarjeta: '💳', credito: '💳', qr: '📱',
+  };
+  const pagoIcon = (medio: string) => {
+    const key = medio.toLowerCase();
+    return Object.entries(PAGO_ICONS).find(([k]) => key.includes(k))?.[1] ?? '💰';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 print:bg-white">
 
-      {/* ── Toolbar (oculta al imprimir) ── */}
+      {/* ── Toolbar (oculta al imprimir) ─────────────────────────────────────── */}
       <div className="print:hidden sticky top-0 z-20 bg-[#07111F] border-b border-white/10 px-5 py-3">
         <div className="max-w-[1400px] mx-auto flex items-center gap-3 flex-wrap">
           <Link href="/" className="flex items-center gap-1.5 text-white/50 hover:text-white text-[12px] transition-colors">
             <ArrowLeft className="w-3.5 h-3.5" /> Inicio
           </Link>
-
           <div className="w-px h-5 bg-white/20" />
-
           <FileText className="w-4 h-4 text-acqua" />
           <span className="text-white font-bold text-[13px]">Lista de Precios</span>
 
@@ -175,38 +212,83 @@ export default function ListaPreciosPage() {
           {/* Lista selector */}
           <div className="flex gap-1.5">
             {listas.filter(l => !['ml', 'mayorista', 'prof', 'cons'].includes(l.id)).map(l => (
-              <button
-                key={l.id}
+              <button key={l.id}
                 onClick={() => { setSelectedLista(l.id); setSelectedPago(''); }}
                 className={cn(
                   'px-3 py-1.5 rounded-lg text-[12px] font-bold border transition-all',
                   selectedLista === l.id
                     ? 'bg-acqua text-white border-acqua'
                     : 'bg-white/10 text-white/60 border-white/20 hover:bg-white/20 hover:text-white'
-                )}
-              >
+                )}>
                 {l.nombre}
               </button>
             ))}
           </div>
 
+          {/* Columnas de precio */}
+          <div className="flex items-center gap-0.5 bg-white/10 rounded-lg p-0.5">
+            {[1, 2, 3].map(n => (
+              <button key={n} onClick={() => setNumColumnas(n)}
+                className={cn(
+                  'px-2.5 py-1 rounded-md text-[11px] font-bold transition-all',
+                  numColumnas === n
+                    ? 'bg-acqua text-white'
+                    : 'text-white/50 hover:text-white',
+                )}>
+                {n} {n === 1 ? 'precio' : 'precios'}
+              </button>
+            ))}
+          </div>
+
+          {/* Fotos toggle */}
+          <button
+            onClick={() => setShowPhotos(v => !v)}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all',
+              showPhotos
+                ? 'bg-white/20 text-white border-white/30'
+                : 'bg-white/5 text-white/40 border-white/10',
+            )}>
+            {showPhotos ? <Camera className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+            {showPhotos ? 'Con fotos' : 'Sin fotos'}
+          </button>
+
+          {/* Header image upload */}
+          <input ref={headerInputRef} type="file" accept="image/*" className="hidden" onChange={handleHeaderUpload} />
+          <button
+            onClick={() => headerInputRef.current?.click()}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-all',
+              customHeader
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                : 'bg-white/10 text-white/60 border-white/20 hover:bg-white/20 hover:text-white',
+            )}>
+            <Upload className="w-3.5 h-3.5" />
+            {customHeader ? 'Header ✓' : 'Subir header'}
+          </button>
+          {customHeader && (
+            <button onClick={removeHeader} className="text-white/40 hover:text-rose-400 transition-colors" title="Quitar header">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Print */}
           <button
             onClick={() => window.print()}
             className="flex items-center gap-2 px-4 py-2 bg-acqua text-white text-[12px] font-bold rounded-lg hover:bg-acqua-dark transition-colors"
           >
             <Printer className="w-3.5 h-3.5" />
-            Imprimir / PDF
+            {selectedCount > 0 ? `Imprimir (${selectedCount})` : 'Imprimir / PDF'}
           </button>
         </div>
       </div>
 
       <div className="max-w-[1400px] mx-auto px-4 py-4">
 
-        {/* ── Filters (ocultas al imprimir) ── */}
+        {/* ── Filters (ocultas al imprimir) ─────────────────────────────────── */}
         <div className="print:hidden bg-white rounded-xl border border-gray-200 p-4 mb-4 space-y-3">
-
-          {/* Lista info + medio de pago */}
           <div className="flex items-center gap-4 flex-wrap">
+            {/* Lista info */}
             <div className={cn(
               'flex-1 min-w-[200px] p-3 rounded-xl border',
               selectedLista === 'A' && 'bg-blue-50 border-blue-200',
@@ -214,7 +296,7 @@ export default function ListaPreciosPage() {
               selectedLista === 'C' && 'bg-amber-50 border-amber-200',
             )}>
               <div className="text-[11px] font-bold text-gray-700">{listaConfig.nombre}</div>
-              <div className="text-[10px] text-gray-500">{(listaConfig as Lista).descripcion}</div>
+              <div className="text-[10px] text-gray-500">{listaConfig.descripcion}</div>
               {listaConfig.descuento > 0 && (
                 <div className="text-[11px] font-bold text-green-600 mt-1">
                   -{listaConfig.descuento}% sobre Lista A
@@ -231,16 +313,13 @@ export default function ListaPreciosPage() {
               )}
             </div>
 
-            {/* Recargo extra por medio */}
+            {/* Recargo adicional */}
             {pagos.some(p => p.lista === selectedLista && p.recargo > 0) && (
               <div className="min-w-[180px]">
                 <label className="block text-[10px] font-semibold text-gray-400 uppercase mb-1">Recargo adicional</label>
                 <div className="relative">
-                  <select
-                    value={selectedPago}
-                    onChange={e => setSelectedPago(e.target.value)}
-                    className="w-full appearance-none pl-3 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-[12px] text-gray-700 focus:outline-none"
-                  >
+                  <select value={selectedPago} onChange={e => setSelectedPago(e.target.value)}
+                    className="w-full appearance-none pl-3 pr-8 py-2 bg-white border border-gray-200 rounded-lg text-[12px] text-gray-700 focus:outline-none">
                     <option value="">Sin recargo</option>
                     {pagos.filter(p => p.lista === selectedLista && p.recargo > 0).map(p => (
                       <option key={p.id} value={p.id}>{p.medio} (+{p.recargo}%)</option>
@@ -252,21 +331,13 @@ export default function ListaPreciosPage() {
             )}
           </div>
 
-          {/* Filtros de productos */}
+          {/* Filtros */}
           <div className="flex gap-2 flex-wrap items-center">
-            {/* Búsqueda */}
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar producto…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-acqua/30"
-              />
+              <input type="text" placeholder="Buscar producto…" value={search} onChange={e => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-acqua/30" />
             </div>
-
-            {/* Categoría */}
             <div className="relative">
               <select value={category} onChange={e => setCategory(e.target.value)}
                 className="appearance-none pl-3 pr-8 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 focus:outline-none max-w-[180px]">
@@ -274,8 +345,6 @@ export default function ListaPreciosPage() {
               </select>
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
             </div>
-
-            {/* Proveedor */}
             <div className="relative">
               <select value={supplier} onChange={e => setSupplier(e.target.value)}
                 className="appearance-none pl-3 pr-8 py-2 border border-gray-200 rounded-lg text-[12px] text-gray-700 focus:outline-none max-w-[200px]">
@@ -283,132 +352,239 @@ export default function ListaPreciosPage() {
               </select>
               <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
             </div>
-
-            {/* Con stock */}
             <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
               <input type="checkbox" checked={showStock} onChange={e => setShowStock(e.target.checked)} className="rounded accent-acqua" />
               Solo con stock
             </label>
-
-            {/* Compact */}
             <label className="flex items-center gap-1.5 text-[12px] text-gray-600 cursor-pointer">
               <input type="checkbox" checked={compact} onChange={e => setCompact(e.target.checked)} className="rounded accent-acqua" />
-              Vista compacta
+              Compacto
             </label>
 
+            {/* Separador */}
+            <div className="w-px h-5 bg-gray-200" />
+
+            {/* Selection controls */}
+            <button onClick={() => setSelectedIds(new Set(filtered.map(p => p.id)))}
+              className="flex items-center gap-1 text-[11px] font-semibold text-[#0784F2] hover:underline">
+              <CheckSquare className="w-3.5 h-3.5" /> Seleccionar todos
+            </button>
+            {selectedCount > 0 && (
+              <button onClick={() => setSelectedIds(new Set())}
+                className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-gray-600 hover:underline">
+                <Square className="w-3.5 h-3.5" /> Limpiar selección
+              </button>
+            )}
             <div className="text-[11px] text-gray-400 ml-auto">
-              <span className="font-semibold text-gray-700">{filtered.length}</span> productos
+              {selectedCount > 0
+                ? <span><span className="font-bold text-[#07111F]">{selectedCount}</span> seleccionados de {filtered.length}</span>
+                : <span><span className="font-semibold text-gray-700">{filtered.length}</span> productos (todos)</span>
+              }
             </div>
           </div>
+
+          {/* Header upload hint */}
+          {!customHeader && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg border border-dashed border-gray-200 text-[11px] text-gray-500">
+              <Upload className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                Podés subir un <strong>header personalizado</strong> (JPG/PNG) que aparecerá al imprimir.
+                Tamaño recomendado: <strong>2480 × 480 px</strong> (fondo negro, texto blanco).
+              </span>
+              <button onClick={() => headerInputRef.current?.click()}
+                className="ml-auto shrink-0 text-[#0784F2] font-semibold hover:underline">
+                Subir
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* ── Print header (solo al imprimir) ── */}
-        <div className="hidden print:block mb-6">
-          <div className="flex items-center justify-between border-b-2 border-gray-900 pb-3 mb-2">
-            <div>
-              <h1 className="text-2xl font-black text-gray-900">ACQUA PACHECO</h1>
-              <p className="text-sm text-gray-500">Lista de Precios — {listaConfig.nombre}</p>
+        {/* ── Print header ──────────────────────────────────────────────────── */}
+        <div className="hidden print:block mb-4">
+          {customHeader ? (
+            /* Custom uploaded header */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={customHeader} alt="Header" className="w-full object-cover mb-4 rounded-lg" style={{ maxHeight: '140px' }} />
+          ) : (
+            /* Auto-generated black header */
+            <div className="bg-black text-white rounded-xl overflow-hidden mb-3">
+              <div className="flex items-center justify-between px-8 py-5">
+                {/* Left: logo + contact */}
+                <div className="flex items-center gap-5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/brand/acqua-logo-white.png" alt="Acqua" className="h-9 object-contain" />
+                  <div className="w-px h-10 bg-white/20" />
+                  <div className="text-[10px] leading-relaxed text-white/70">
+                    <div className="font-bold text-white text-[11px]">Av. Boulogne Sur Mer 919</div>
+                    <div>General Pacheco, Tigre, Bs. As.</div>
+                    <div>Cel.: 11-5857-8383 · hola@acquapacheco.com</div>
+                  </div>
+                </div>
+
+                {/* Center: 3 pricing tiers */}
+                <div className="flex items-center gap-3">
+                  {/* Tier 1: Lista A — Crédito */}
+                  <div className="text-center px-3 py-2 border border-white/20 rounded-lg">
+                    <div className="text-[8px] font-bold text-white/50 uppercase tracking-widest mb-0.5">Precio Final</div>
+                    <div className="text-[10px] font-black text-white">💳 CRÉDITO</div>
+                    <div className="text-[9px] text-white/50 mt-0.5">Lista A · 1 cuota</div>
+                  </div>
+                  <div className="w-px h-10 bg-white/20" />
+                  {/* Tier 2: Lista B — Débito / Transferencia / Efectivo */}
+                  <div className="text-center px-3 py-2 border border-blue-400/40 rounded-lg bg-blue-400/10">
+                    <div className="text-[8px] font-bold text-blue-300 uppercase tracking-widest mb-0.5">{descB}% OFF</div>
+                    <div className="text-[10px] font-black text-white">📲 DÉBITO / TRANSF.</div>
+                    <div className="text-[9px] text-blue-200 mt-0.5">y efectivo</div>
+                  </div>
+                  <div className="w-px h-10 bg-white/20" />
+                  {/* Tier 3: Lista C — Efectivo Retiro en Tienda */}
+                  <div className="text-center px-3 py-2 border border-emerald-400/40 rounded-lg bg-emerald-400/10">
+                    <div className="text-[8px] font-bold text-emerald-300 uppercase tracking-widest mb-0.5">{descC}% OFF</div>
+                    <div className="text-[10px] font-black text-white">💵 EFECTIVO</div>
+                    <div className="text-[9px] text-emerald-200 mt-0.5">retiro en tienda</div>
+                  </div>
+                </div>
+
+                {/* Right: lista + date */}
+                <div className="text-right">
+                  <div className="text-[9px] font-bold uppercase tracking-widest text-white/40 mb-0.5">Lista de precios</div>
+                  <div className="text-2xl font-black text-white">{listaConfig.nombre}</div>
+                  <div className="text-[10px] text-white/50 mt-0.5">
+                    {new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}
+                  </div>
+                  {listaConfig.descuento > 0 && (
+                    <div className="text-[11px] font-bold text-emerald-400 mt-0.5">{listaConfig.descuento}% de descuento</div>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="text-right text-sm text-gray-500">
-              <div>{new Date().toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
-              {listaConfig.descuento > 0 && (
-                <div className="font-bold text-gray-900">{listaConfig.descuento}% de descuento</div>
-              )}
-              {pagosMedios.length > 0 && (
-                <div className="text-xs">{pagosMedios.map(p => p.medio).join(' · ')}</div>
-              )}
-              {category !== 'Todas' && <div className="text-xs">Categoría: {category}</div>}
-              {supplier !== 'Todos' && <div className="text-xs">Proveedor: {supplier}</div>}
-            </div>
-          </div>
-          <p className="text-xs text-gray-400">Los precios incluyen IVA. Sujetos a cambio sin previo aviso.</p>
+          )}
+          <p className="text-[9px] text-gray-400 mb-2">Los precios incluyen IVA. Sujetos a cambio sin previo aviso.</p>
         </div>
 
-        {/* ── Product table ── */}
-        {grouped.map(([cat, prods]) => (
-          <div key={cat} className="mb-6 print:mb-4 print:break-inside-avoid-page">
+        {/* ── Product table ──────────────────────────────────────────────────── */}
+        {grouped.map(([cat, prods]) => {
+          const printableProds = prods.filter(p => isSelected(p.id));
+          if (printableProds.length === 0 && selectedIds.size > 0) return null;
+          return (
+            <div key={cat} className="mb-6 print:mb-3 print:break-inside-avoid-page">
+              {/* Category header */}
+              <div className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg mb-2 print:rounded-none print:px-0 print:border-b print:border-gray-300',
+                'bg-gray-100 print:bg-transparent'
+              )}>
+                <Tag className="w-3.5 h-3.5 text-gray-500 print:hidden" />
+                <span className="font-bold text-[12px] text-gray-700 uppercase tracking-wide">{cat}</span>
+                <span className="text-[10px] text-gray-400 print:hidden">({prods.length})</span>
+              </div>
 
-            {/* Category header */}
-            <div className={cn(
-              'flex items-center gap-2 px-3 py-2 rounded-lg mb-2 print:rounded-none print:px-0 print:border-b print:border-gray-300',
-              'bg-gray-100 print:bg-transparent'
-            )}>
-              <Tag className="w-3.5 h-3.5 text-gray-500 print:hidden" />
-              <span className="font-bold text-[12px] text-gray-700 uppercase tracking-wide">{cat}</span>
-              <span className="text-[10px] text-gray-400 print:hidden">({prods.length})</span>
-            </div>
-
-            {/* Products */}
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden print:border-0 print:rounded-none">
-              <table className="w-full text-[12px]">
-                <thead className={cn(
-                  'bg-gray-50 border-b border-gray-100 print:bg-transparent print:border-gray-300',
-                  compact ? 'hidden' : ''
-                )}>
-                  <tr>
-                    <th className="text-left px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
-                      Producto
-                    </th>
-                    <th className="text-left px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide hidden sm:table-cell print:table-cell">
-                      SKU
-                    </th>
-                    <th className="text-right px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide w-32">
-                      Precio {listaConfig.nombre}
-                      {recargo > 0 && ` (+${recargo}%)`}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {prods.map((p, i) => {
-                    const precio = calcPrice(p.price, recargo);
-                    const isLast = i === prods.length - 1;
-                    return (
-                      <tr
-                        key={p.id}
-                        className={cn(
-                          'hover:bg-gray-50/60 print:hover:bg-transparent transition-colors print:break-inside-avoid',
-                          !isLast && 'border-b border-gray-50 print:border-gray-200',
-                          compact ? 'py-0.5' : ''
-                        )}
-                      >
-                        <td className={cn('px-4', compact ? 'py-1' : 'py-2.5')}>
-                          <div className="flex items-center gap-2.5">
-                            {/* Foto — solo en pantalla, no en impresión */}
-                            {!compact && (() => { const img = getImg(p); return (
-                              <div className="print:hidden w-8 h-8 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
-                                {img
-                                  ? <img src={img} alt={p.name} className="w-full h-full object-contain p-0.5" />
-                                  : <ImageIcon className="w-3 h-3 text-gray-300" />}
-                              </div>
-                            ); })()}
-                            <div className="min-w-0">
-                              <div className="font-medium text-gray-900 leading-snug">
-                                {p.name}
-                              </div>
-                              {p.seiqCategory && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 print:hidden">
-                                  <Tag className="w-2.5 h-2.5" /> {p.seiqCategory}
-                                </span>
-                              )}
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden print:border-0 print:rounded-none">
+                <table className="w-full text-[12px]">
+                  <thead className={cn(
+                    'bg-gray-50 border-b border-gray-100 print:bg-transparent print:border-gray-300',
+                    compact ? 'hidden' : ''
+                  )}>
+                    <tr>
+                      {/* Checkbox col (screen only) */}
+                      <th className="print:hidden w-10 px-2 py-2" />
+                      {/* Photo col */}
+                      {showPhotos && <th className={cn('w-16 print:w-28 px-2 py-2')} />}
+                      <th className="text-left px-4 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                        Producto
+                      </th>
+                      <th className="text-right px-3 py-2 text-[10px] font-semibold text-gray-400 uppercase tracking-wide w-36">
+                        <span className="hidden print:inline">💳 Crédito</span>
+                        <span className="print:hidden">{numColumnas === 1 ? 'Precio' : 'Crédito (A)'}</span>
+                      </th>
+                      {numColumnas >= 2 && (
+                        <th className="text-right px-3 py-2 text-[10px] font-semibold text-blue-500 uppercase tracking-wide w-36">
+                          <span className="hidden print:inline">📲 Débito/Transf</span>
+                          <span className="print:hidden">Déb/Transf ({descB}%off)</span>
+                        </th>
+                      )}
+                      {numColumnas >= 3 && (
+                        <th className="text-right px-3 py-2 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide w-36">
+                          <span className="hidden print:inline">💵 Ef. Retiro</span>
+                          <span className="print:hidden">Ef. Retiro ({descC}%off)</span>
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {prods.map((p, i) => {
+                      const precio  = calcPrice(p.price, recargo);
+                      const img     = getImg(p);
+                      const isLast  = i === prods.length - 1;
+                      const checked = selectedIds.has(p.id);
+                      const hidden  = selectedIds.size > 0 && !selectedIds.has(p.id);
+                      return (
+                        <tr
+                          key={p.id}
+                          className={cn(
+                            'hover:bg-gray-50/60 print:hover:bg-transparent transition-colors print:break-inside-avoid',
+                            !isLast && 'border-b border-gray-50 print:border-gray-200',
+                            compact && 'py-0.5',
+                            hidden && 'print:hidden',    // hide unselected when printing
+                          )}
+                        >
+                          {/* Checkbox (screen only) */}
+                          <td className="print:hidden w-10 px-2" onClick={() => toggleProduct(p.id)}>
+                            <div className={cn(
+                              'w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-colors mx-auto',
+                              checked
+                                ? 'bg-[#0784F2] border-[#0784F2]'
+                                : 'border-gray-300 hover:border-[#0784F2]',
+                            )}>
+                              {checked && <span className="text-white text-[10px] font-black">✓</span>}
                             </div>
-                          </div>
-                        </td>
-                        <td className={cn('px-4 hidden sm:table-cell print:table-cell', compact ? 'py-1' : 'py-2.5')}>
-                          {p.sku
-                            ? <span className="text-[10px] font-mono text-gray-400 bg-gray-50 print:bg-transparent px-1.5 py-0.5 rounded">{p.sku}</span>
-                            : <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className={cn('px-4 text-right font-bold text-gray-900', compact ? 'py-1' : 'py-2.5')}>
-                          {fmt(precio)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+
+                          {/* Photo */}
+                          {showPhotos && (
+                            <td className={cn('w-16 print:w-28 px-1', compact ? 'py-0.5' : 'py-1.5')}>
+                              <div className="w-14 h-14 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center mx-auto print:w-24 print:h-24">
+                                {img
+                                  ? <img src={img} alt={p.name} className="w-full h-full object-contain" />
+                                  : <ImageIcon className="w-4 h-4 text-gray-300" />}
+                              </div>
+                            </td>
+                          )}
+
+                          {/* Name */}
+                          <td className={cn('px-4', compact ? 'py-1' : 'py-2.5')}>
+                            <div className="font-medium text-gray-900 leading-snug">{p.name}</div>
+                            {p.seiqCategory && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-blue-600 print:hidden">
+                                <Tag className="w-2.5 h-2.5" /> {p.seiqCategory}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Price A — Crédito */}
+                          <td className={cn('px-3 text-right font-bold text-gray-900', compact ? 'py-1' : 'py-2.5')}>
+                            {fmt(precioA(p.price))}
+                          </td>
+                          {/* Price B — Débito/Transf */}
+                          {numColumnas >= 2 && (
+                            <td className={cn('px-3 text-right font-bold text-blue-700', compact ? 'py-1' : 'py-2.5')}>
+                              {fmt(precioB(p.price))}
+                            </td>
+                          )}
+                          {/* Price C — Efectivo retiro */}
+                          {numColumnas >= 3 && (
+                            <td className={cn('px-3 text-right font-bold text-emerald-700', compact ? 'py-1' : 'py-2.5')}>
+                              {fmt(precioC(p.price))}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {filtered.length === 0 && (
           <div className="text-center py-20 text-gray-400">
@@ -418,7 +594,7 @@ export default function ListaPreciosPage() {
         )}
 
         {/* ── Print footer ── */}
-        <div className="hidden print:block mt-8 pt-4 border-t border-gray-300 text-center text-xs text-gray-400">
+        <div className="hidden print:block mt-6 pt-3 border-t border-gray-300 text-center text-[9px] text-gray-400">
           ACQUA PACHECO · Lista generada el {new Date().toLocaleDateString('es-AR')} · Precios en pesos argentinos (ARS) con IVA incluido
         </div>
       </div>
@@ -426,11 +602,8 @@ export default function ListaPreciosPage() {
       {/* ── Print CSS ── */}
       <style>{`
         @media print {
-          @page {
-            margin: 1.5cm 1.5cm 2cm 1.5cm;
-            size: A4;
-          }
-          body { font-size: 11pt; }
+          @page { margin: 1cm 1.2cm 1.5cm 1.2cm; size: A4; }
+          body { font-size: 10pt; }
           table { page-break-inside: auto; }
           tr    { page-break-inside: avoid; page-break-after: auto; }
           thead { display: table-header-group; }

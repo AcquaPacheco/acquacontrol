@@ -44,4 +44,11 @@ src/data/competitor-links.json
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
+# Logs y archivos locales del servidor
+server.log
+tunnel.log
+url-publica.txt
+
+# Lanzadores específicos de la máquina local
+iniciar-acqua.bat
+"Abrir Acqua Control.html"

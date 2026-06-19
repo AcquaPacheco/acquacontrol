@@ -2235,9 +2235,10 @@ export default function ProductosPage() {
   const [showHidden,  setShowHidden]  = useState(false);
   // ── Sync stock ──
   const stockInputRef = useRef<HTMLInputElement>(null);
-  const [syncingStock,  setSyncingStock]  = useState(false);
-  const [syncingPrices, setSyncingPrices] = useState(false);
-  const [syncToast,     setSyncToast]     = useState<string | null>(null);
+  const [syncingStock,    setSyncingStock]    = useState(false);
+  const [syncingPrices,   setSyncingPrices]   = useState(false);
+  const [syncingProducts, setSyncingProducts] = useState(false);
+  const [syncToast,       setSyncToast]       = useState<string | null>(null);
   const [syncResult,    setSyncResult]    = useState<{ matched: number; unmatched: number; unmatchedNames: string[] } | null>(null);
 
   // ── Estado local de activos (para actualizar sin recargar la página) ──
@@ -2372,6 +2373,26 @@ export default function ProductosPage() {
       setSyncToast(`❌ Error: ${String(e)}`);
     } finally {
       setSyncingPrices(false);
+    }
+  };
+
+  // ── Sincronizar inventario completo (trae productos nuevos de Odoo) ──
+  const handleSyncProducts = async () => {
+    setSyncingProducts(true);
+    setSyncToast(null);
+    try {
+      const res  = await fetch('/api/sync-products-odoo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ syncCost: true, syncPrice: true, createNew: true }) });
+      const data = await res.json() as { ok: boolean; message?: string; error?: string; created?: number; matched?: number; hidden?: number };
+      if (data.ok) {
+        setSyncToast(`✓ ${data.message ?? `${data.matched ?? 0} actualizados, ${data.created ?? 0} nuevos — Recargando…`}`);
+        setTimeout(() => window.location.reload(), 2500);
+      } else {
+        setSyncToast(`❌ ${data.error ?? 'Error al sincronizar'}`);
+      }
+    } catch (e) {
+      setSyncToast(`❌ Error: ${String(e)}`);
+    } finally {
+      setSyncingProducts(false);
     }
   };
 
@@ -2794,6 +2815,21 @@ export default function ProductosPage() {
                   {syncingPrices
                     ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Sincronizando…</>
                     : <><RefreshCw className="w-3.5 h-3.5" /> Sync precios</>}
+                </button>
+                <button
+                  onClick={handleSyncProducts}
+                  disabled={syncingProducts}
+                  title="Sincronizar inventario completo desde Odoo: actualiza precios y trae productos nuevos"
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-2.5 bg-white border rounded-xl text-[11px] font-semibold transition-colors',
+                    syncingProducts
+                      ? 'opacity-60 cursor-not-allowed border-gray-200'
+                      : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400',
+                  )}
+                >
+                  {syncingProducts
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Importando…</>
+                    : <><RefreshCw className="w-3.5 h-3.5" /> Sync inventario</>}
                 </button>
                 <button
                   onClick={() => setShowHidden(v => !v)}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import productsData from '@/data/products.json';
 import { cn } from '@/lib/utils';
@@ -8,7 +8,7 @@ import { useSettings, buildOdooImageUrl } from '@/lib/use-settings';
 import {
   TrendingUp, TrendingDown, Package, AlertTriangle,
   ChevronRight, Search, ArrowUpRight, Layers,
-  Users, Star, X, Image as ImageIcon,
+  Users, Star, X, Image as ImageIcon, List, LayoutGrid,
 } from 'lucide-react';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,6 +229,7 @@ function ProductDrawer({
 }: { title: string; products: Product[]; onClose: () => void; odooUrl: string }) {
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'margin_asc' | 'margin_desc' | 'name'>('margin_asc');
+  const [view,   setView]   = useState<'tabla' | 'grid'>('tabla');
 
   const filtered = useMemo(() => {
     let p = products.filter(p => p.cost > 0 && p.price > 1 && p.margin !== null);
@@ -247,22 +248,24 @@ function ProductDrawer({
     p.image || buildOdooImageUrl(p.odooId ?? null, 'product.template', odooUrl);
 
   return (
-    <div className="fixed inset-0 z-50 flex" onClick={e => { if (e.target === e.currentTarget) onClose(); }}
-      style={{ background: 'rgba(7,17,31,0.55)', backdropFilter: 'blur(4px)' }}>
-      <div className="ml-auto w-full max-w-[520px] bg-white h-full flex flex-col shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(7,17,31,0.6)', backdropFilter: 'blur(6px)' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="shrink-0 px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div className="shrink-0 px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-[15px] font-black text-gray-900">{title}</h3>
-            <p className="text-[11px] text-gray-400">{filtered.length} productos · margen promedio {pct(avgM)}</p>
+            <h3 className="text-[16px] font-black text-gray-900">{title}</h3>
+            <p className="text-[11px] text-gray-400 mt-0.5">{filtered.length} productos · margen promedio {pct(avgM)}</p>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Link
               href={`/productos?supplier=${encodeURIComponent(title)}`}
               onClick={onClose}
               className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold bg-[#07111F] text-white rounded-lg hover:opacity-80 transition-opacity"
-              title="Ver en Productos"
             >
               <ArrowUpRight className="w-3.5 h-3.5" />
               Ver en Productos
@@ -273,8 +276,8 @@ function ProductDrawer({
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+        {/* Toolbar */}
+        <div className="shrink-0 px-5 py-3 border-b border-gray-100 flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <input value={search} onChange={e => setSearch(e.target.value)}
@@ -287,62 +290,124 @@ function ProductDrawer({
             <option value="margin_desc">Margen ↓</option>
             <option value="name">Nombre</option>
           </select>
+          {/* View toggle */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5 gap-0.5">
+            <button
+              onClick={() => setView('tabla')}
+              className={cn('px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1',
+                view === 'tabla' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+            >
+              <List className="w-3 h-3" /> Tabla
+            </button>
+            <button
+              onClick={() => setView('grid')}
+              className={cn('px-2.5 py-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1',
+                view === 'grid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400 hover:text-gray-600')}
+            >
+              <LayoutGrid className="w-3 h-3" /> Grid
+            </button>
+          </div>
         </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-          {filtered.map(p => {
-            const band  = marginBand(p.margin as number);
-            const imgSrc = getImg(p);
-            return (
-              <div key={p.id} className="px-4 py-2.5 flex items-center gap-3 hover:bg-[#07111F]/[0.02] transition-colors group">
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
 
-                {/* Foto */}
-                <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
-                  {imgSrc ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imgSrc} alt={p.name} className="w-full h-full object-contain p-0.5" />
-                  ) : (
-                    <ImageIcon className="w-4 h-4 text-gray-300" />
-                  )}
-                </div>
+          {/* ── TABLA ── */}
+          {view === 'tabla' && (
+            <table className="w-full text-left">
+              <thead className="sticky top-0 bg-gray-50 border-b border-gray-100 z-10">
+                <tr>
+                  <th className="px-5 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider w-10" />
+                  <th className="px-3 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Producto</th>
+                  <th className="px-3 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Costo</th>
+                  <th className="px-3 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Precio</th>
+                  <th className="px-3 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider text-right">Margen</th>
+                  <th className="px-3 py-2.5 w-8" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map(p => {
+                  const band   = marginBand(p.margin as number);
+                  const imgSrc = getImg(p);
+                  return (
+                    <tr key={p.id} className="hover:bg-gray-50/70 transition-colors group">
+                      <td className="pl-5 pr-2 py-2">
+                        <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
+                          {imgSrc
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={imgSrc} alt="" className="w-full h-full object-contain p-0.5" />
+                            : <ImageIcon className="w-4 h-4 text-gray-300" />}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <p className="text-[12px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {p.sku && <span className="text-[9px] font-mono text-gray-400 bg-gray-100 px-1 py-px rounded">{p.sku}</span>}
+                          {p.supplierName && <span className="text-[9px] text-gray-400 truncate max-w-[140px]">{p.supplierName}</span>}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right text-[12px] font-mono text-gray-500">{fmt(p.cost)}</td>
+                      <td className="px-3 py-2 text-right text-[12px] font-mono text-gray-700 font-semibold">{fmt(p.price)}</td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={cn('text-[14px] font-black tabular-nums', band.color)}>{pct(p.margin as number)}</span>
+                      </td>
+                      <td className="pr-4 py-2">
+                        <Link
+                          href={`/productos?search=${encodeURIComponent(p.name.slice(0, 60))}`}
+                          onClick={onClose}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-[#07111F] hover:bg-gray-100 transition-all opacity-0 group-hover:opacity-100"
+                        >
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12px] font-semibold text-gray-900 line-clamp-1">{p.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {p.sku && (
-                      <span className="text-[9px] font-mono text-gray-400 bg-gray-100 px-1 py-px rounded">{p.sku}</span>
-                    )}
-                    {p.supplierName && (
-                      <span className="text-[9px] text-gray-400 truncate max-w-[120px]">{p.supplierName}</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Margin + prices + link */}
-                <div className="shrink-0 text-right flex items-center gap-2">
-                  <div>
-                    <div className="text-[10px] text-gray-400 tabular-nums">{fmt(p.cost)} → {fmt(p.price)}</div>
-                    <span className={cn('text-[14px] font-black tabular-nums', band.color)}>
-                      {pct(p.margin as number)}
-                    </span>
-                  </div>
+          {/* ── GRID ── */}
+          {view === 'grid' && (
+            <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {filtered.map(p => {
+                const band   = marginBand(p.margin as number);
+                const imgSrc = getImg(p);
+                return (
                   <Link
+                    key={p.id}
                     href={`/productos?search=${encodeURIComponent(p.name.slice(0, 60))}`}
                     onClick={onClose}
-                    className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-[#07111F] hover:bg-gray-100 transition-all opacity-0 group-hover:opacity-100"
-                    title="Ver en Productos"
+                    className="bg-white border border-gray-100 rounded-xl p-3 hover:border-gray-300 hover:shadow-md transition-all group flex flex-col gap-2"
                   >
-                    <ArrowUpRight className="w-3.5 h-3.5" />
+                    {/* Image */}
+                    <div className="w-full aspect-square rounded-lg bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
+                      {imgSrc
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={imgSrc} alt="" className="w-full h-full object-contain p-2" />
+                        : <ImageIcon className="w-8 h-8 text-gray-200" />}
+                    </div>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[11px] font-semibold text-gray-900 line-clamp-2 leading-snug">{p.name}</p>
+                      {p.supplierName && <p className="text-[9px] text-gray-400 mt-0.5 truncate">{p.supplierName}</p>}
+                    </div>
+                    {/* Prices + margin */}
+                    <div className="flex items-end justify-between">
+                      <div>
+                        <p className="text-[9px] text-gray-400 tabular-nums">{fmt(p.cost)} → {fmt(p.price)}</p>
+                      </div>
+                      <span className={cn('text-[15px] font-black tabular-nums', band.color)}>{pct(p.margin as number)}</span>
+                    </div>
                   </Link>
-                </div>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
 
+          {/* Sin datos footer */}
           {sinDatos.length > 0 && (
-            <div className="px-4 py-3 bg-gray-50 flex items-center gap-2">
+            <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
               <Package className="w-3.5 h-3.5 text-gray-400 shrink-0" />
               <p className="text-[11px] text-gray-400 font-semibold">{sinDatos.length} sin costo/precio — no calculable</p>
             </div>
@@ -361,6 +426,29 @@ export default function RentabilidadPage() {
   const [drawerData, setDrawerData] = useState<{ title: string; products: Product[] } | null>(null);
   const [activeView, setActiveView] = useState<'categorias' | 'proveedores'>('categorias');
   const [search, setSearch] = useState('');
+
+  // ── Insights dismiss ──────────────────────────────────────────────────────
+  const STORAGE_KEY = 'acqua_insights_dismissed_v1';
+  const [dismissedIns, setDismissedIns] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) setDismissedIns(new Set(JSON.parse(raw) as string[]));
+    } catch { /* ignore */ }
+  }, []);
+  const dismissInsight = useCallback((key: string) => {
+    setDismissedIns(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
+  const restoreInsights = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    setDismissedIns(new Set());
+  }, []);
+  const visibleInsights = autoInsights.filter(ins => !dismissedIns.has(ins.title));
 
   const { settings } = useSettings();
   const odooUrl = settings?.odooServerUrl ?? '';
@@ -442,22 +530,55 @@ export default function RentabilidadPage() {
 
             {/* Auto-insights */}
             <div className="bg-white rounded-2xl border border-gray-100 p-5">
-              <h3 className="text-[12px] font-bold text-gray-900 mb-3 flex items-center gap-1.5">
-                <span>💡</span> Insights automáticos
-              </h3>
-              <div className="space-y-3">
-                {autoInsights.map((ins, i) => (
-                  <div key={i} className={cn(
-                    'rounded-xl p-3 border',
-                    ins.type === 'good' ? 'bg-[#16A34A]/5 border-[#16A34A]/15' :
-                    ins.type === 'warn' ? 'bg-[#F97316]/5 border-[#F97316]/15' :
-                    'bg-[#0784F2]/5 border-[#0784F2]/15',
-                  )}>
-                    <p className="text-[11px] font-bold text-gray-900 mb-0.5">{ins.icon} {ins.title}</p>
-                    <p className="text-[10px] text-gray-600 leading-relaxed">{ins.body}</p>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[12px] font-bold text-gray-900 flex items-center gap-1.5">
+                  <span>💡</span> Insights automáticos
+                  {visibleInsights.length > 0 && (
+                    <span className="text-[10px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                      {visibleInsights.length}
+                    </span>
+                  )}
+                </h3>
+                {dismissedIns.size > 0 && (
+                  <button
+                    onClick={restoreInsights}
+                    className="text-[10px] font-semibold text-[#0784F2] hover:underline"
+                  >
+                    Restaurar ({dismissedIns.size})
+                  </button>
+                )}
               </div>
+
+              {visibleInsights.length === 0 ? (
+                <div className="text-center py-6">
+                  <p className="text-[12px] font-semibold text-gray-700">Sin insights pendientes</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Descartaste todos los insights.</p>
+                  <button onClick={restoreInsights} className="mt-3 text-[11px] font-semibold text-[#0784F2] hover:underline">
+                    Restaurar todos
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {visibleInsights.map((ins) => (
+                    <div key={ins.title} className={cn(
+                      'group relative rounded-xl p-3 border pr-8',
+                      ins.type === 'good' ? 'bg-[#16A34A]/5 border-[#16A34A]/15' :
+                      ins.type === 'warn' ? 'bg-[#F97316]/5 border-[#F97316]/15' :
+                      'bg-[#0784F2]/5 border-[#0784F2]/15',
+                    )}>
+                      <p className="text-[11px] font-bold text-gray-900 mb-0.5">{ins.icon} {ins.title}</p>
+                      <p className="text-[10px] text-gray-600 leading-relaxed">{ins.body}</p>
+                      <button
+                        onClick={() => dismissInsight(ins.title)}
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100"
+                        title="Descartar"
+                      >
+                        <X className="w-3 h-3 text-gray-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
